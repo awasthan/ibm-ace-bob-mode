@@ -292,14 +292,16 @@ END;
       <principle priority="high">
         <name>Schema Consistency Within Project</name>
         <description>
-          All ESQL files within the same project directory should use the same BROKER SCHEMA
+          All ESQL files within the same project directory should use the same BROKER SCHEMA. The ESQL files should be placed in the
+          directory that the namespace refers to. So if the schema is called com.weather.api, all esql files that use that schema
+          must be placed in WeatherAPI_App/com/weather/api
         </description>
         <rationale>
           Ensures modules can reference each other without namespace conflicts
         </rationale>
         <example><![CDATA[
 Project: WeatherAPI_App
-Directory: WeatherAPI_App/
+Directory: WeatherAPI_App/com/weather/api
 
 All ESQL files should use:
 BROKER SCHEMA com.weather.api
@@ -714,14 +716,14 @@ SET location = InputLocalEnvironment.HTTP.Input.QueryString.location;
           <name>parseQueryString</name>
           <value>true</value>
           <description>CRITICAL: Must be set to true to enable query parameter parsing</description>
-          <how_to_set>
+          <how_to_set><![CDATA[
             In the message flow XML, add parseQueryString="true" attribute to the HTTP Input node:
-            <nodes xmi:type="ComIbmWSInput.msgnode:FCMComposite_1" 
-                   URLSpecifier="/weather/current" 
-                   parseQueryString="true" 
-                   messageDomainProperty="JSON" 
+            <nodes xmi:type="ComIbmWSInput.msgnode:FCMComposite_1"
+                   URLSpecifier="/weather/current"
+                   parseQueryString="true"
+                   messageDomainProperty="JSON"
                    httpMethod="GET">
-          </how_to_set>
+          ]]></how_to_set>
         </setting>
         <setting>
           <name>Message Domain</name>
@@ -810,7 +812,7 @@ END IF;
           <case>Simple value: ?location=London</case>
           <case>Spaces: ?location=New%20York</case>
           <case>Special characters: ?location=São%20Paulo</case>
-          <case>Multiple parameters: ?location=London&units=metric</case>
+          <case>Multiple parameters: ?location=London&amp;units=metric</case>
           <case>Missing parameter: (no query string)</case>
           <case>Empty parameter: ?location=</case>
         </test_cases>
@@ -864,7 +866,7 @@ END IF;
         </command>
         <command>
           <description>Valid request with multiple parameters</description>
-          <code>curl "http://localhost:7800/weather/current?location=London&units=metric"</code>
+          <code>curl "http://localhost:7800/weather/current?location=London&amp;units=metric"</code>
         </command>
         <command>
           <description>Request with URL-encoded spaces</description>
