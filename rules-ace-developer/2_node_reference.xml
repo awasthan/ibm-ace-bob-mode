@@ -1,0 +1,221 @@
+<ace_builtin_node_reference>
+  <overview>
+    Reference for commonly used ACE built-in nodes. For the complete, authoritative list
+    see: https://www.ibm.com/docs/en/app-connect/13.0.x?topic=development-built-in-nodes
+    Always verify xmi:type namespace prefixes using the ace-bob skill before use.
+  </overview>
+
+  <node_categories>
+
+    <category name="Input_Nodes">
+      <description>Nodes that receive messages and start a message flow.</description>
+      <nodes>
+        <node name="HTTP Input">
+          <xmi_type_prefix>ComIbmWSInput.msgnode</xmi_type_prefix>
+          <purpose>Receives HTTP/HTTPS requests (REST or SOAP over HTTP)</purpose>
+          <key_properties>
+            <property name="URLSpecifier">URL pattern to match, e.g. /MyService/* or /*</property>
+            <property name="messageDomainProperty">Message domain for parsing (XMLNSC, JSON, BLOB etc.)</property>
+            <property name="timeoutForClient">Seconds to wait for flow to complete before timing out the client</property>
+          </key_properties>
+          <terminals>out, catch, timeout, failure</terminals>
+          <usage_notes>The catch terminal fires when an unhandled exception occurs in the flow.
+          Always connect the catch terminal to an error handler subflow.</usage_notes>
+        </node>
+        <node name="HTTP Reply">
+          <xmi_type_prefix>ComIbmWSReply.msgnode</xmi_type_prefix>
+          <purpose>Sends the HTTP response back to the caller</purpose>
+          <usage_notes>Must be connected for every synchronous HTTP flow. Set
+          OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code" before this node
+          to control the HTTP response code.</usage_notes>
+        </node>
+        <node name="MQ Input">
+          <xmi_type_prefix>ComIbmMQInput.msgnode</xmi_type_prefix>
+          <purpose>Reads messages from an IBM MQ queue</purpose>
+          <key_properties>
+            <property name="queueName">Name of the MQ queue to read from (REQUIRED)</property>
+            <property name="transactionMode">Whether to use MQ transactions (yes/no/automatic)</property>
+          </key_properties>
+          <terminals>out, catch, failure</terminals>
+        </node>
+        <node name="MQ Output">
+          <xmi_type_prefix>ComIbmMQOutput.msgnode</xmi_type_prefix>
+          <purpose>Writes messages to an IBM MQ queue</purpose>
+          <key_properties>
+            <property name="queueName">Destination queue name</property>
+            <property name="transactionMode">Transaction mode</property>
+          </key_properties>
+        </node>
+        <node name="File Input">
+          <xmi_type_prefix>ComIbmFileInput.msgnode</xmi_type_prefix>
+          <purpose>Reads files from a directory</purpose>
+          <key_properties>
+            <property name="inputDirectory">Directory to scan for files</property>
+            <property name="fileNamePattern">Filename pattern (e.g. *.csv)</property>
+          </key_properties>
+          <usage_notes>InputLocalEnvironment.File.Name contains the filename.
+          InputLocalEnvironment.File.Directory contains the directory path.</usage_notes>
+        </node>
+        <node name="Email Output">
+          <xmi_type_prefix>ComIbmEmailOutput.msgnode</xmi_type_prefix>
+          <purpose>Sends email messages</purpose>
+          <key_properties>
+            <property name="smtpServer">SMTP server hostname (can be configured as UDP)</property>
+          </key_properties>
+          <usage_notes>Set OutputRoot.EmailOutputHeader.To, .From, .Subject before this node.
+          Message body must be set as BLOB in OutputRoot.BLOB.BLOB.</usage_notes>
+        </node>
+      </nodes>
+    </category>
+
+    <category name="Processing_Nodes">
+      <description>Nodes that transform, route, or process messages.</description>
+      <nodes>
+        <node name="Compute">
+          <xmi_type_prefix>ComIbmCompute.msgnode</xmi_type_prefix>
+          <purpose>Executes ESQL to transform, route, or manipulate messages</purpose>
+          <key_properties>
+            <property name="computeExpression">ESQL module reference: esql://routine/schema.package#ModuleName.Main</property>
+            <property name="computeMode">destinationAndMessage (default), messageOnly, destinationOnly</property>
+            <property name="dataSource">JDBC data source name for database access (only if DB queries needed)</property>
+          </key_properties>
+          <terminals>out, failure</terminals>
+          <usage_notes>The ESQL module must be a CREATE COMPUTE MODULE with a Main function
+          returning BOOLEAN. Return TRUE to propagate to 'out', FALSE to suppress propagation.
+          Use PROPAGATE TO TERMINAL 'out1' etc. for multiple output terminals.</usage_notes>
+        </node>
+        <node name="Filter">
+          <xmi_type_prefix>ComIbmFilter.msgnode</xmi_type_prefix>
+          <purpose>Routes messages based on a boolean ESQL expression</purpose>
+          <key_properties>
+            <property name="filterExpression">ESQL module reference returning BOOLEAN</property>
+          </key_properties>
+          <terminals>true, false, unknown, failure</terminals>
+          <usage_notes>Use CREATE FILTER MODULE (not COMPUTE MODULE). The Main function
+          must RETURN TRUE or FALSE. The 'unknown' terminal fires when the expression
+          cannot be evaluated.</usage_notes>
+        </node>
+        <node name="Flow Order">
+          <xmi_type_prefix>ComIbmFlowOrder.msgnode</xmi_type_prefix>
+          <purpose>Propagates message to multiple output terminals in sequence</purpose>
+          <terminals>first, second, third, ... (configurable)</terminals>
+          <usage_notes>Used to trigger multiple downstream paths in a defined order.
+          Commonly used to sequence audit logging before and after main processing.</usage_notes>
+        </node>
+        <node name="HTTP Request">
+          <xmi_type_prefix>ComIbmWSRequest.msgnode</xmi_type_prefix>
+          <purpose>Makes an outbound HTTP/HTTPS request to a backend service</purpose>
+          <key_properties>
+            <property name="timeoutForServer">Seconds to wait for backend response</property>
+            <property name="URLSpecifier">Static URL (override dynamically via OutputLocalEnvironment.Destination.HTTP.RequestURL)</property>
+          </key_properties>
+          <terminals>out, error, timeout, failure</terminals>
+          <usage_notes>Set OutputLocalEnvironment.Destination.HTTP.RequestURL dynamically in
+          the preceding Compute node to route to different backends. Set
+          OutputLocalEnvironment.Destination.HTTP.RequestLine.Method for PUT/POST/GET/DELETE.
+          The 'error' terminal fires when the backend returns an HTTP error status.</usage_notes>
+        </node>
+        <node name="TryCatch">
+          <xmi_type_prefix>ComIbmTryCatch.msgnode</xmi_type_prefix>
+          <purpose>Catches exceptions thrown within its contained sub-flow</purpose>
+          <terminals>try (wraps the happy path), catch (fires on exception)</terminals>
+          <usage_notes>Wrap sections of a flow that might throw exceptions. The catch terminal
+          receives the original message plus InputExceptionList. Use THROW USER EXCEPTION
+          in ESQL to signal anticipated errors.</usage_notes>
+        </node>
+        <node name="Route">
+          <xmi_type_prefix>ComIbmRoute.msgnode</xmi_type_prefix>
+          <purpose>Routes messages to different terminals based on message content</purpose>
+          <usage_notes>Alternative to chained Filter nodes when routing to many paths.
+          Configure routing conditions in the node properties.</usage_notes>
+        </node>
+        <node name="Database">
+          <xmi_type_prefix>ComIbmDatabase.msgnode</xmi_type_prefix>
+          <purpose>Executes a database operation using an SQL statement</purpose>
+          <key_properties>
+            <property name="dataSource">JDBC data source name</property>
+            <property name="sqlStatement">SQL statement to execute</property>
+          </key_properties>
+          <usage_notes>For complex queries or inserts, prefer using a Compute node with
+          dataSource set and ESQL SELECT/PASSTHRU statements for full flexibility.</usage_notes>
+        </node>
+        <node name="Trace">
+          <xmi_type_prefix>ComIbmTrace.msgnode</xmi_type_prefix>
+          <purpose>Writes message content to a trace file for debugging</purpose>
+          <key_properties>
+            <property name="traceFile">Absolute file path for trace output</property>
+            <property name="pattern">ESQL expression defining what to trace</property>
+          </key_properties>
+          <usage_notes>Use for development/debugging only. Remove or disable in production
+          flows to avoid performance impact and disk space consumption.</usage_notes>
+        </node>
+        <node name="Timeout_Control">
+          <xmi_type_prefix>ComIbmTimeoutControl.msgnode</xmi_type_prefix>
+          <purpose>Schedules or controls timeout events for timer-based flows</purpose>
+          <usage_notes>Used with TimeoutNotification node to implement scheduled/recurring
+          processing. Set OutputLocalEnvironment.TimeoutRequest.StartTime,
+          OutputLocalEnvironment.TimeoutRequest.Interval (seconds), and
+          OutputLocalEnvironment.TimeoutRequest.Count (-1 for forever).</usage_notes>
+        </node>
+        <node name="Timeout_Notification">
+          <xmi_type_prefix>ComIbmTimeoutNotification.msgnode</xmi_type_prefix>
+          <purpose>Fires a message at a scheduled time or interval</purpose>
+          <terminals>out, failure</terminals>
+          <usage_notes>Starting node for timer-driven flows (scheduled batch jobs, polling).</usage_notes>
+        </node>
+        <node name="XSL_Transform">
+          <xmi_type_prefix>ComIbmXslMqsi.msgnode</xmi_type_prefix>
+          <purpose>Applies an XSLT stylesheet to transform XML messages</purpose>
+          <key_properties>
+            <property name="xsltFile">Path to the XSLT file relative to the project</property>
+          </key_properties>
+        </node>
+        <node name="Java_Compute">
+          <xmi_type_prefix>ComIbmJavaCompute.msgnode</xmi_type_prefix>
+          <purpose>Executes Java code to process messages</purpose>
+          <usage_notes>The Java class must extend MbJavaComputeNode and implement evaluate().
+          Use when ESQL cannot achieve the required transformation (e.g., complex string
+          manipulation, file I/O, calling external Java libraries).</usage_notes>
+        </node>
+        <node name="Validate">
+          <xmi_type_prefix>ComIbmValidate.msgnode</xmi_type_prefix>
+          <purpose>Validates the message against a schema (XSD, WSDL)</purpose>
+          <terminals>out, failure</terminals>
+        </node>
+        <node name="Mapping">
+          <xmi_type_prefix>ComIbmMSLMapping.msgnode</xmi_type_prefix>
+          <purpose>Graphical message mapping using a .map file</purpose>
+          <usage_notes>Preferred for structural message transformations where a visual
+          map is easier to maintain than ESQL.</usage_notes>
+        </node>
+      </nodes>
+    </category>
+
+    <category name="Subflow_Terminals">
+      <description>Special nodes used in subflow files.</description>
+      <nodes>
+        <node name="Subflow Input">
+          <xmi_type_prefix>eflow:FCMSource</xmi_type_prefix>
+          <purpose>Entry point terminal of a subflow</purpose>
+        </node>
+        <node name="Subflow Output">
+          <xmi_type_prefix>eflow:FCMSink</xmi_type_prefix>
+          <purpose>Exit point terminal of a subflow</purpose>
+        </node>
+      </nodes>
+    </category>
+
+  </node_categories>
+
+  <node_connection_rules>
+    <rule>Every input node's catch/failure terminal MUST be connected to an error handler.</rule>
+    <rule>Every HTTP Input node needs a corresponding HTTP Reply node on the successful path.</rule>
+    <rule>HTTP Request node 'error' terminal should connect to an error handler that re-throws
+    or wraps the upstream error.</rule>
+    <rule>TryCatch 'catch' terminal receives InputExceptionList — always extract error details
+    from it in the downstream Compute node.</rule>
+    <rule>FlowOrder terminals (first, second) fire in sequence — use this for audit/logging
+    patterns where you want guaranteed ordering.</rule>
+  </node_connection_rules>
+
+</ace_builtin_node_reference>

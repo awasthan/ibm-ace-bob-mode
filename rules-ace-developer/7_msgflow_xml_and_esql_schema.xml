@@ -1,0 +1,994 @@
+<msgflow_xml_and_esql_schema>
+  <overview>
+    Mandatory rules for authoring correct .msgflow XML and .esql files.
+    All rules are grounded in evidence — either from real ACE projects in this workspace,
+    from the ACE 13.0.x schema at:
+      /Applications/IBM App Connect Enterprise/common/schemas/MessageFlow/MessageFlow.xsd
+    or from the official IBM documentation at:
+      https://www.ibm.com/docs/en/app-connect/13.0.x
+
+    NEVER guess attribute names, terminal names, or ESQL paths. Every value in this
+    document has been verified. Follow every rule exactly.
+
+    KNOWN ERRORS THIS FILE PREVENTS:
+      "Feature 'nodes' not found"                   → MF-01, MF-02, MF-03
+      "Unset mandatory property Web service URL"    → MF-08b (URLSpecifier, not webServiceURL)
+      "Can not locate timeout terminal"             → MF-08b (timeout not on HTTP Request)
+      "Unable to locate URN esql://routine/#..."    → MF-08c (duplicate module names)
+      Query string always NULL in ESQL              → MF-06b (parseQueryString="true" required)
+  </overview>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       SECTION 1 — MSGFLOW XML STRUCTURE
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <msgflow_xml_structure>
+
+    <rule id="MF-01" severity="CRITICAL">
+      <title>Root element must be ecore:EPackage with mandatory attributes</title>
+      <description>
+        A .msgflow file is an EMF/XMI document. The root element MUST be ecore:EPackage.
+        The following attributes are non-negotiable on every .msgflow and .subflow file:
+          xmi:version="2.0"
+          xmlns:xmi="http://www.omg.org/XMI"
+          xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore"
+          xmlns:eflow="http://www.ibm.com/wbi/2005/eflow"
+          xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility"
+          nsURI    — relative path of this file inside the project (see MF-02)
+          nsPrefix — nsURI with '/' replaced by '_' (see MF-02)
+      </description>
+      <template><![CDATA[
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0"
+    xmlns:xmi="http://www.omg.org/XMI"
+    xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore"
+    xmlns:eflow="http://www.ibm.com/wbi/2005/eflow"
+    xmlns:utility="http://www.ibm.com/wbi/2005/eflow_utility"
+    xmlns:ComIbmWSInput.msgnode="ComIbmWSInput.msgnode"
+    xmlns:ComIbmWSReply.msgnode="ComIbmWSReply.msgnode"
+    xmlns:ComIbmWSRequest.msgnode="ComIbmWSRequest.msgnode"
+    xmlns:ComIbmCompute.msgnode="ComIbmCompute.msgnode"
+    [... one xmlns: for every node type used in this flow ...]
+    nsURI="FlowName.msgflow"
+    nsPrefix="FlowName.msgflow">
+      ]]></template>
+    </rule>
+
+    <rule id="MF-02" severity="CRITICAL">
+      <title>nsURI and nsPrefix must reflect the file's relative path inside the project</title>
+      <description>
+        nsURI = file path relative to the project root.
+        nsPrefix = nsURI with every '/' replaced by '_'. The '.' in the filename is kept as-is.
+      </description>
+      <examples>
+        <example>
+          <file>WeatherAPI/CurrentWeather.msgflow (root-level file)</file>
+          <nsURI>CurrentWeather.msgflow</nsURI>
+          <nsPrefix>CurrentWeather.msgflow</nsPrefix>
+        </example>
+        <example>
+          <file>PolicySearch_Service/gen/PolicySearch_Service.msgflow</file>
+          <nsURI>gen/PolicySearch_Service.msgflow</nsURI>
+          <nsPrefix>gen_PolicySearch_Service.msgflow</nsPrefix>
+        </example>
+      </examples>
+    </rule>
+
+    <rule id="MF-03" severity="CRITICAL">
+      <title>Every node type used in the flow MUST have its own xmlns: declaration on the root element</title>
+      <description>
+        ACE Toolkit parses node types by looking up the xmlns prefix on the root ecore:EPackage.
+        If a node's type prefix is missing, ACE throws "Feature 'nodes' not found" and refuses
+        to open the flow.
+
+        For every built-in node type add:   xmlns:NodeType="NodeType"
+        For every subflow reference add:    xmlns:path_to_SubFlow.subflow="path/to/SubFlow.subflow"
+        (replace '/' with '_' in the prefix, keep '.' as-is)
+
+        Subflow Input (eflow:FCMSource) and Subflow Output (eflow:FCMSink) use the eflow:
+        namespace already declared — they do NOT need an additional xmlns: entry.
+      </description>
+      <built_in_node_xmlns_table>
+        <entry prefix="ComIbmWSInput.msgnode"               value="ComIbmWSInput.msgnode"               label="HTTP Input"/>
+        <entry prefix="ComIbmWSReply.msgnode"               value="ComIbmWSReply.msgnode"               label="HTTP Reply"/>
+        <entry prefix="ComIbmWSRequest.msgnode"             value="ComIbmWSRequest.msgnode"             label="HTTP Request"/>
+        <entry prefix="ComIbmCompute.msgnode"               value="ComIbmCompute.msgnode"               label="Compute"/>
+        <entry prefix="ComIbmSOAPInput.msgnode"             value="ComIbmSOAPInput.msgnode"             label="SOAP Input"/>
+        <entry prefix="ComIbmSOAPReply.msgnode"             value="ComIbmSOAPReply.msgnode"             label="SOAP Reply"/>
+        <entry prefix="ComIbmSOAPRequest.msgnode"           value="ComIbmSOAPRequest.msgnode"           label="SOAP Request"/>
+        <entry prefix="ComIbmFlowOrder.msgnode"             value="ComIbmFlowOrder.msgnode"             label="Flow Order"/>
+        <entry prefix="ComIbmFilter.msgnode"                value="ComIbmFilter.msgnode"                label="Filter"/>
+        <entry prefix="ComIbmRoute.msgnode"                 value="ComIbmRoute.msgnode"                 label="Route"/>
+        <entry prefix="ComIbmLabel.msgnode"                 value="ComIbmLabel.msgnode"                 label="Label"/>
+        <entry prefix="ComIbmRouteToLabel.msgnode"          value="ComIbmRouteToLabel.msgnode"          label="Route To Label"/>
+        <entry prefix="ComIbmMQInput.msgnode"               value="ComIbmMQInput.msgnode"               label="MQ Input"/>
+        <entry prefix="ComIbmMQOutput.msgnode"              value="ComIbmMQOutput.msgnode"              label="MQ Output"/>
+        <entry prefix="ComIbmSAPRequest.msgnode"            value="ComIbmSAPRequest.msgnode"            label="SAP Request"/>
+        <entry prefix="ComIbmResetContentDescriptor.msgnode" value="ComIbmResetContentDescriptor.msgnode" label="Reset Content Descriptor"/>
+        <entry prefix="ComIbmTryCatch.msgnode"              value="ComIbmTryCatch.msgnode"              label="Try/Catch"/>
+        <entry prefix="ComIbmTrace.msgnode"                 value="ComIbmTrace.msgnode"                 label="Trace"/>
+        <entry prefix="ComIbmJavaCompute.msgnode"           value="ComIbmJavaCompute.msgnode"           label="Java Compute"/>
+        <entry prefix="ComIbmTimeoutControl.msgnode"        value="ComIbmTimeoutControl.msgnode"        label="Timeout Control"/>
+        <entry prefix="ComIbmTimeoutNotification.msgnode"   value="ComIbmTimeoutNotification.msgnode"   label="Timeout Notification"/>
+      </built_in_node_xmlns_table>
+    </rule>
+
+    <rule id="MF-04" severity="CRITICAL">
+      <title>eClassifiers structure must wrap all nodes and connections</title>
+      <description>
+        Directly inside ecore:EPackage there MUST be exactly one eClassifiers element.
+        nodes and connections live inside composition.
+        eStructuralFeatures (for subflow UDPs) appear before translation.
+        propertyOrganizer and stickyBoard MUST appear after composition.
+      </description>
+      <template><![CDATA[
+<eClassifiers xmi:type="eflow:FCMComposite" name="FCMComposite_1">
+  <eSuperTypes href="http://www.ibm.com/wbi/2005/eflow#//FCMBlock"/>
+
+  <!-- eStructuralFeatures only needed for subflows with configurable UDPs -->
+  <eStructuralFeatures xmi:type="ecore:EAttribute"
+                       xmi:id="Property.MyProperty"
+                       name="MyProperty"
+                       defaultValueLiteral="">
+    <eType xmi:type="ecore:EDataType"
+           href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+  </eStructuralFeatures>
+
+  <translation xmi:type="utility:TranslatableString"
+               key="FlowName"
+               bundleName="FlowName"
+               pluginId="ProjectName"/>
+  <colorGraphic16 xmi:type="utility:GIFFileGraphic"
+                  resourceName="platform:/plugin/ProjectName/icons/full/obj16/FlowName.gif"/>
+  <colorGraphic32 xmi:type="utility:GIFFileGraphic"
+                  resourceName="platform:/plugin/ProjectName/icons/full/obj30/FlowName.gif"/>
+  <composition>
+    <!-- nodes then connections here -->
+  </composition>
+  <propertyOrganizer/>
+  <stickyBoard/>
+</eClassifiers>
+      ]]></template>
+      <field_rules>
+        <rule>key in translation = flow filename without extension e.g. "CurrentWeather"</rule>
+        <rule>bundleName = subfolder/FlowName when file is in a subfolder, else just FlowName</rule>
+        <rule>pluginId = Eclipse project name e.g. "WeatherAPI", "PolicySearch_Service"</rule>
+      </field_rules>
+    </rule>
+
+    <rule id="MF-05" severity="CRITICAL">
+      <title>Every nodes element must have xmi:type, xmi:id, location, and a translation child</title>
+      <description>
+        xmi:type = registered xmlns prefix + ":FCMComposite_1" for all regular nodes.
+        Exceptions: Subflow Input = eflow:FCMSource, Subflow Output = eflow:FCMSink.
+        xmi:id must be unique within the file.
+        location = canvas x,y coordinates used by the visual editor.
+      </description>
+      <xmi_type_reference>
+        <entry node="HTTP Input"               xmi_type="ComIbmWSInput.msgnode:FCMComposite_1"/>
+        <entry node="HTTP Reply"               xmi_type="ComIbmWSReply.msgnode:FCMComposite_1"/>
+        <entry node="HTTP Request"             xmi_type="ComIbmWSRequest.msgnode:FCMComposite_1"/>
+        <entry node="Compute"                  xmi_type="ComIbmCompute.msgnode:FCMComposite_1"/>
+        <entry node="SOAP Input"               xmi_type="ComIbmSOAPInput.msgnode:FCMComposite_1"/>
+        <entry node="SOAP Reply"               xmi_type="ComIbmSOAPReply.msgnode:FCMComposite_1"/>
+        <entry node="SOAP Request"             xmi_type="ComIbmSOAPRequest.msgnode:FCMComposite_1"/>
+        <entry node="Flow Order"               xmi_type="ComIbmFlowOrder.msgnode:FCMComposite_1"/>
+        <entry node="Filter"                   xmi_type="ComIbmFilter.msgnode:FCMComposite_1"/>
+        <entry node="Route"                    xmi_type="ComIbmRoute.msgnode:FCMComposite_1"/>
+        <entry node="Label"                    xmi_type="ComIbmLabel.msgnode:FCMComposite_1"/>
+        <entry node="Route To Label"           xmi_type="ComIbmRouteToLabel.msgnode:FCMComposite_1"/>
+        <entry node="MQ Input"                 xmi_type="ComIbmMQInput.msgnode:FCMComposite_1"/>
+        <entry node="MQ Output"                xmi_type="ComIbmMQOutput.msgnode:FCMComposite_1"/>
+        <entry node="SAP Request"              xmi_type="ComIbmSAPRequest.msgnode:FCMComposite_1"/>
+        <entry node="Reset Content Descriptor" xmi_type="ComIbmResetContentDescriptor.msgnode:FCMComposite_1"/>
+        <entry node="Try/Catch"                xmi_type="ComIbmTryCatch.msgnode:FCMComposite_1"/>
+        <entry node="Trace"                    xmi_type="ComIbmTrace.msgnode:FCMComposite_1"/>
+        <entry node="Subflow Input"            xmi_type="eflow:FCMSource"/>
+        <entry node="Subflow Output"           xmi_type="eflow:FCMSink"/>
+        <entry node="Referenced subflow"       xmi_type="subflow_xmlns_prefix:FCMComposite_1"/>
+      </xmi_type_reference>
+    </rule>
+
+    <rule id="MF-06" severity="CRITICAL">
+      <title>Compute node computeExpression must use exact esql://routine/ format</title>
+      <description>
+        Format:  esql://routine/BROKERSC HEMA#ModuleName.Main
+
+        - Root-level ESQL file (no BROKER SCHEMA statement in file):
+            computeExpression="esql://routine/#ModuleName.Main"
+        - ESQL in gen/ subfolder (BROKER SCHEMA gen in file):
+            computeExpression="esql://routine/gen#ModuleName.Main"
+
+        computeMode values:
+          "destinationAndMessage"  — all normal transform/route modules (default)
+          "exception"              — modules that run only on exception paths
+      </description>
+      <examples>
+        <example note="root-level ESQL, no broker schema">
+          computeExpression="esql://routine/#BuildCurrentWeatherRequest.Main"
+          computeMode="destinationAndMessage"
+        </example>
+        <example note="gen/ folder ESQL, broker schema gen">
+          computeExpression="esql://routine/gen#SetRequestInAuditParms_Compute.Main"
+          computeMode="destinationAndMessage"
+        </example>
+        <example note="database-accessing Compute node">
+          computeExpression="esql://routine/gen#UpdateCache_Compute.Main"
+          computeMode="destinationAndMessage"
+          dataSource="IIBDB"
+        </example>
+      </examples>
+    </rule>
+
+    <rule id="MF-06b" severity="CRITICAL">
+      <title>HTTP Input node — accessing query parameters requires parseQueryString="true"</title>
+      <description>
+        SOURCE OF TRUTH: https://www.ibm.com/docs/en/app-connect/13.0.x?topic=nodes-httpinput-node
+        Section: "Parse Query String" property.
+
+        By default, the HTTP Input node (ComIbmWSInput.msgnode) does NOT parse the URL query
+        string into individual elements in the LocalEnvironment tree.
+        The "Parse Query String" property defaults to False.
+
+        WITHOUT parseQueryString="true" on the node:
+          InputLocalEnvironment.HTTP.Input.QueryString.myParam  →  ALWAYS NULL
+          Attempting to read any query parameter in ESQL will silently return NULL.
+
+        WITH parseQueryString="true" on the node:
+          For the request  GET /path?location=London&amp;units=metric
+          ACE URL-decodes the query string (per RFC 3986) and populates:
+            InputLocalEnvironment.HTTP.Input.QueryString.location = 'London'
+            InputLocalEnvironment.HTTP.Input.QueryString.units    = 'metric'
+
+        ESQL to read a query parameter (clean, simple — no manual string parsing needed):
+          SET location = COALESCE(InputLocalEnvironment.HTTP.Input.QueryString.location, '');
+
+        Path segments from wildcard URLs (e.g. URLSpecifier="/api/*") are at:
+          InputLocalEnvironment.HTTP.Input.Path.Segment[1]
+          InputLocalEnvironment.HTTP.Input.Path.Segment[2]  (etc.)
+
+        RULE: Every HTTP Input node that needs query parameters in ESQL MUST have
+        parseQueryString="true" in the .msgflow XML. Without it, all reads return NULL
+        and the flow silently misbehaves (no error, wrong data).
+      </description>
+      <correct_msgflow_example><![CDATA[
+<nodes xmi:type="ComIbmWSInput.msgnode:FCMComposite_1"
+       xmi:id="FCMComposite_1_1"
+       location="40,140"
+       URLSpecifier="/weather/current"
+       parseQueryString="true">
+  <translation xmi:type="utility:ConstantString" string="HTTP Input"/>
+</nodes>
+      ]]></correct_msgflow_example>
+      <correct_esql_example><![CDATA[
+-- Works because parseQueryString="true" is set on the HTTP Input node
+SET location = COALESCE(InputLocalEnvironment.HTTP.Input.QueryString.location, '');
+      ]]></correct_esql_example>
+      <wrong_example><![CDATA[
+<!-- WRONG: missing parseQueryString — all query param reads will return NULL -->
+<nodes xmi:type="ComIbmWSInput.msgnode:FCMComposite_1"
+       URLSpecifier="/weather/current">
+  <translation .../>
+</nodes>
+      ]]></wrong_example>
+    </rule>
+
+    <rule id="MF-07" severity="REQUIRED">
+      <title>SOAP Input node mandatory attributes</title>
+      <template><![CDATA[
+<nodes xmi:type="ComIbmSOAPInput.msgnode:FCMComposite_1"
+       xmi:id="FCMComposite_1_1"
+       location="20,20"
+       wsdlFileName="MyService.wsdl"
+       selectedPortType="MyServicePortType"
+       selectedBinding="MyServiceSoapBinding"
+       selectedPort="MyServicePort"
+       targetNamespace="http://example.com/myservice/"
+       useHTTPTransport="true"
+       urlSelector="/MyService"
+       allowQueryWSDL="true">
+  <translation xmi:type="utility:ConstantString" string="SOAP Input"/>
+</nodes>
+      ]]></template>
+    </rule>
+
+    <rule id="MF-08" severity="REQUIRED">
+      <title>SOAP Request node mandatory attributes</title>
+      <description>
+        The mandatory URL attribute for SOAP Request is webServiceURL.
+        Do not confuse with HTTP Request which uses URLSpecifier (see MF-08b).
+      </description>
+      <template><![CDATA[
+<nodes xmi:type="ComIbmSOAPRequest.msgnode:FCMComposite_1"
+       xmi:id="FCMComposite_1_N"
+       location="x,y"
+       wsdlOperationMode="gateway"
+       wsdlFileName="path/to/MyService.wsdl"
+       selectedPortType="MyPortType"
+       selectedBinding="MyServiceSoapBinding"
+       selectedOperation="myOperation"
+       selectedPort="MyPort"
+       targetNamespace="http://example.com/myservice/"
+       useHTTPTransport="true"
+       webServiceURL="http://dummyUrl"
+       sslProtocol="TLS"
+       parserXmlnscBuildTreeUsingXMLSchema="false"
+       validateMaster="none">
+  <translation xmi:type="utility:ConstantString" string="MySOAPRequest"/>
+</nodes>
+      ]]></template>
+    </rule>
+
+    <rule id="MF-08b" severity="CRITICAL">
+      <title>HTTP Request node — correct mandatory attribute, valid terminals, and dynamic URL</title>
+      <description>
+        SOURCE OF TRUTH: MessageFlow.xsd ComIbmWSRequestNodeType (line 6600).
+        Reference: xsd:attribute ref="iib:URLSpecifier" use="required"
+
+        ── MANDATORY ATTRIBUTE ──────────────────────────────────────────────────
+        XML attribute name : URLSpecifier          ← CORRECT
+        Toolkit UI label   : "Web service URL"
+        Wrong attribute    : webServiceURL         ← WRONG (that belongs to SOAP Request)
+
+        Using webServiceURL on an HTTP Request node leaves URLSpecifier unset, causing:
+          "Unset mandatory property Web service URL" in the Toolkit.
+
+        URLSpecifier MUST always be a non-empty URL string. Even when the runtime URL
+        is overridden dynamically via OutputLocalEnvironment.Destination.HTTP.RequestURL
+        in a preceding Compute node, URLSpecifier still holds the static default URL.
+
+        DO NOT use requestTimeout as an XML attribute — it is not valid for this node.
+        Use timeoutForServer (optional) for request timeout configuration.
+
+        ── DYNAMIC URL OVERRIDE (verified via ACE user trace) ───────────────────
+        Set the full URL including query string in a preceding Compute node:
+          SET OutputLocalEnvironment.Destination.HTTP.RequestURL = fullBackendUrl;
+          SET OutputLocalEnvironment.Destination.HTTP.RequestLine.Method = 'GET';
+        The HTTP Request node then uses this URL at runtime, overriding URLSpecifier.
+
+        ── VALID OUTPUT TERMINALS (verified from schema) ────────────────────────
+          OutTerminal.out      — backend returned HTTP 2xx (success)
+          OutTerminal.error    — backend returned HTTP 4xx or 5xx
+          OutTerminal.failure  — node-level failure (DNS failure, connection refused, etc.)
+
+        ── INVALID TERMINALS — DO NOT USE on HTTP Request node ──────────────────
+          OutTerminal.timeout  — does NOT exist on ComIbmWSRequest.msgnode.
+                                 Wiring it causes "Can not locate terminal" in the Toolkit.
+                                 (timeout terminal exists ONLY on the HTTP Input node)
+          OutTerminal.fault    — does NOT exist on ComIbmWSRequest.msgnode.
+                                 (fault terminal exists only on SOAP Request node)
+
+        ── ON THE error TERMINAL — reading the backend response ─────────────────
+        When the backend returns 4xx/5xx, the HTTP Request node routes to OutTerminal.error.
+        At that point InputLocalEnvironment is empty (NULL root). The backend response is in:
+          InputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code"  (integer status)
+          InputRoot.BLOB.BLOB                                          (response body as BLOB)
+
+        ESQL to pass the backend error response straight through:
+          SET backendStatus = CAST(
+              InputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code" AS INTEGER);
+          SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code" = backendStatus;
+          SET OutputRoot.BLOB.BLOB = InputRoot.BLOB.BLOB;
+
+        ── ATTRIBUTE CONFUSION TABLE ─────────────────────────────────────────────
+        ComIbmWSRequest.msgnode  (HTTP Request)  → mandatory URL attr = URLSpecifier
+        ComIbmSOAPRequest.msgnode (SOAP Request) → mandatory URL attr = webServiceURL
+        ComIbmWSInput.msgnode    (HTTP Input)    → URLSpecifier = inbound path pattern
+      </description>
+      <correct_template><![CDATA[
+<nodes xmi:type="ComIbmWSRequest.msgnode:FCMComposite_1"
+       xmi:id="FCMComposite_1_3"
+       location="420,140"
+       URLSpecifier="http://backend.example.com/api/endpoint">
+  <translation xmi:type="utility:ConstantString" string="CallBackend"/>
+</nodes>
+
+<!-- Wire error terminal (HTTP 4xx/5xx from backend) -->
+<connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_5"
+             sourceNode="FCMComposite_1_3" targetNode="FCMComposite_1_Error"
+             sourceTerminalName="OutTerminal.error" targetTerminalName="InTerminal.in"/>
+
+<!-- Wire failure terminal (connection-level failure) -->
+<connections xmi:type="eflow:FCMConnection" xmi:id="FCMConnection_6"
+             sourceNode="FCMComposite_1_3" targetNode="FCMComposite_1_Error"
+             sourceTerminalName="OutTerminal.failure" targetTerminalName="InTerminal.in"/>
+      ]]></correct_template>
+    </rule>
+
+    <rule id="MF-08c" severity="CRITICAL">
+      <title>ESQL module names must be globally unique within an ACE Application project</title>
+      <description>
+        All .esql files in an ACE Application project share the same ESQL compilation scope
+        (they are packaged into a single .appzip at build time). If two .esql files both define
+        a CREATE COMPUTE MODULE with the same name, the Toolkit reports:
+          "Unable to locate URN esql://routine/#ModuleName.Main"
+        for one of the flows because the module name is ambiguous.
+
+        RULE: Prefix every module name with the flow name. Never use generic names like
+        "BuildErrorResponse" or "SetHeaders" that would collide across flows.
+
+        CORRECT — flow-name-prefixed, globally unique:
+          CurrentWeather.esql  →  CREATE COMPUTE MODULE BuildCurrentWeatherRequest
+          CurrentWeather.esql  →  CREATE COMPUTE MODULE BuildCurrentWeatherErrorResponse
+          WeatherAlerts.esql   →  CREATE COMPUTE MODULE BuildWeatherAlertsRequest
+          WeatherAlerts.esql   →  CREATE COMPUTE MODULE BuildWeatherAlertsErrorResponse
+
+        WRONG — generic names that collide:
+          CurrentWeather.esql  →  CREATE COMPUTE MODULE BuildErrorResponse  ← AMBIGUOUS
+          WeatherAlerts.esql   →  CREATE COMPUTE MODULE BuildErrorResponse  ← AMBIGUOUS
+
+        The computeExpression in the .msgflow must exactly match the module name:
+          computeExpression="esql://routine/#BuildCurrentWeatherErrorResponse.Main"
+      </description>
+    </rule>
+
+    <rule id="MF-09" severity="REQUIRED">
+      <title>connections elements — terminal name reference by node type</title>
+      <description>
+        Every wire is a connections element. All xmi:id values must be unique (FCMConnection_N).
+        sourceNode and targetNode reference the xmi:id values of the connected nodes.
+
+        CRITICAL: Terminals differ by node type. Using the wrong terminal name causes
+        "Can not locate terminal" errors. The table below lists every verified terminal.
+      </description>
+      <template><![CDATA[
+<connections xmi:type="eflow:FCMConnection"
+             xmi:id="FCMConnection_1"
+             sourceNode="FCMComposite_1_1"
+             targetNode="FCMComposite_1_2"
+             sourceTerminalName="OutTerminal.out"
+             targetTerminalName="InTerminal.in"/>
+      ]]></template>
+      <terminal_reference>
+
+        <node_terminals node="ComIbmWSInput.msgnode" label="HTTP Input">
+          <out terminal="OutTerminal.out"     purpose="Request received — normal path"/>
+          <out terminal="OutTerminal.catch"   purpose="Unhandled exception thrown downstream"/>
+          <out terminal="OutTerminal.timeout" purpose="Client timed out (timeoutForClient expired)"/>
+          <out terminal="OutTerminal.failure" purpose="Node-level failure"/>
+          <in  terminal="InTerminal.in"       purpose="(not used — HTTP Input is a source node)"/>
+        </node_terminals>
+
+        <node_terminals node="ComIbmWSRequest.msgnode" label="HTTP Request">
+          <out terminal="OutTerminal.out"     purpose="Backend returned HTTP 2xx"/>
+          <out terminal="OutTerminal.error"   purpose="Backend returned HTTP 4xx or 5xx"/>
+          <out terminal="OutTerminal.failure" purpose="Connection-level failure (DNS, refused, etc.)"/>
+          <in  terminal="InTerminal.in"       purpose="Receives the outbound request message"/>
+          <invalid terminal="OutTerminal.timeout" reason="Does NOT exist on this node type — wiring it causes Toolkit error"/>
+          <invalid terminal="OutTerminal.fault"   reason="Does NOT exist on this node type"/>
+        </node_terminals>
+
+        <node_terminals node="ComIbmWSReply.msgnode" label="HTTP Reply">
+          <in  terminal="InTerminal.in"       purpose="Receives the reply message to send to client"/>
+        </node_terminals>
+
+        <node_terminals node="ComIbmSOAPInput.msgnode" label="SOAP Input">
+          <out terminal="OutTerminal.out"     purpose="Request received — normal path"/>
+          <out terminal="OutTerminal.catch"   purpose="Exception thrown downstream"/>
+          <out terminal="OutTerminal.timeout" purpose="HTTP timeout (timeoutForClient expired)"/>
+          <out terminal="OutTerminal.failure" purpose="Node-level failure"/>
+          <in  terminal="InTerminal.Input"    purpose="Used by catch/failure/timeout handler subflows"/>
+        </node_terminals>
+
+        <node_terminals node="ComIbmSOAPRequest.msgnode" label="SOAP Request">
+          <out terminal="OutTerminal.out"     purpose="Successful SOAP response"/>
+          <out terminal="OutTerminal.fault"   purpose="SOAP fault received from backend"/>
+          <out terminal="OutTerminal.failure" purpose="Connection-level failure"/>
+          <in  terminal="InTerminal.in"       purpose="Receives the outbound SOAP request"/>
+          <in  terminal="InTerminal.HTTPError_Input" purpose="Receives HTTP error on fault path"/>
+        </node_terminals>
+
+        <node_terminals node="ComIbmCompute.msgnode" label="Compute">
+          <out terminal="OutTerminal.out"     purpose="Default output — RETURN TRUE propagates here"/>
+          <out terminal="OutTerminal.out1"    purpose="Custom terminal — PROPAGATE TO TERMINAL 'out1'"/>
+          <in  terminal="InTerminal.in"       purpose="Receives the input message"/>
+        </node_terminals>
+
+        <node_terminals node="ComIbmFlowOrder.msgnode" label="Flow Order">
+          <out terminal="OutTerminal.first"   purpose="First branch — fires first"/>
+          <out terminal="OutTerminal.second"  purpose="Second branch — fires after first completes"/>
+          <in  terminal="InTerminal.in"       purpose="Receives the input message"/>
+        </node_terminals>
+
+        <node_terminals node="eflow:FCMSource" label="Subflow Input">
+          <out terminal="OutTerminal.out"     purpose="Entry point of the subflow"/>
+        </node_terminals>
+
+        <node_terminals node="eflow:FCMSink" label="Subflow Output">
+          <in  terminal="InTerminal.in"       purpose="Exit point of the subflow (returns to caller)"/>
+        </node_terminals>
+
+      </terminal_reference>
+    </rule>
+
+    <rule id="MF-10" severity="REQUIRED">
+      <title>Subflow configurable properties require eStructuralFeatures and propertyOrganizer</title>
+      <description>
+        When a subflow exposes User-Defined Properties backed by ESQL EXTERNAL variables,
+        declare each as an eStructuralFeatures before the translation element and register
+        them in the propertyOrganizer section.
+      </description>
+      <template><![CDATA[
+<!-- In eClassifiers, before translation: -->
+<eStructuralFeatures xmi:type="ecore:EAttribute"
+                     xmi:id="Property.DataServiceUrl"
+                     name="DataServiceUrl"
+                     defaultValueLiteral="http://dummyUrl">
+  <eType xmi:type="ecore:EDataType"
+         href="http://www.eclipse.org/emf/2002/Ecore#//EString"/>
+</eStructuralFeatures>
+
+<!-- In propertyOrganizer: -->
+<propertyOrganizer>
+  <propertyDescriptor groupName="Group.Basic" configurable="true" userDefined="true"
+                      describedAttribute="Property.DataServiceUrl">
+    <propertyName xmi:type="utility:TranslatableString"
+                  key="Property.DataServiceUrl"
+                  bundleName="gen/find_Request_Response"
+                  pluginId="PolicySearch_Service"/>
+  </propertyDescriptor>
+</propertyOrganizer>
+      ]]></template>
+    </rule>
+
+    <rule id="MF-11" severity="INFORMATIONAL">
+      <title>Real project reference flows in this workspace</title>
+      <reference_files>
+        <file path="WeatherAPI/CurrentWeather.msgflow"
+              pattern="HTTP Input (parseQueryString=true) + Compute (dynamic URL) + HTTP Request (URLSpecifier) + HTTP Reply. Root-level ESQL, no BROKER SCHEMA."/>
+        <file path="WeatherAPI/WeatherAlerts.msgflow"
+              pattern="Same pattern as CurrentWeather. Two flows in one project — note flow-name-prefixed module names."/>
+        <file path="ExchangeRate/trunk/ExchangeRate_App/ExchangeRate.msgflow"
+              pattern="SOAP Input + SAP Request + common subflows. No BROKER SCHEMA."/>
+        <file path="PolicySearch_Service/trunk/PolicySearch_Service/gen/PolicySearch_Service.msgflow"
+              pattern="SOAP service, RouteToLabel/Label, handler subflows, BROKER SCHEMA gen, cache Compute with dataSource."/>
+        <file path="PolicySearch_Service/trunk/PolicySearch_Service/gen/find_Request_Response.subflow"
+              pattern="Subflow with eStructuralFeatures UDPs, FlowOrder, multiple SOAP Request nodes, FCMSource/FCMSink."/>
+      </reference_files>
+    </rule>
+
+  </msgflow_xml_structure>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       SECTION 2 — ESQL FILE STRUCTURE
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <esql_file_structure>
+
+    <rule id="ES-01" severity="CRITICAL">
+      <title>BROKER SCHEMA must match the file's subfolder path</title>
+      <description>
+        The BROKER SCHEMA value is the segment between "routine/" and "#" in every
+        Compute node's computeExpression.
+        - Root-level ESQL file: omit BROKER SCHEMA entirely.
+        - File in a subfolder: BROKER SCHEMA statement is mandatory.
+      </description>
+      <examples>
+        <example>
+          <esql_file>WeatherAPI/CurrentWeather.esql  (root level)</esql_file>
+          <broker_schema>-- No BROKER SCHEMA statement</broker_schema>
+          <compute_expression>esql://routine/#BuildCurrentWeatherRequest.Main</compute_expression>
+        </example>
+        <example>
+          <esql_file>PolicySearch_Service/gen/PolicySearch_Service.esql</esql_file>
+          <broker_schema>BROKER SCHEMA gen</broker_schema>
+          <compute_expression>esql://routine/gen#SetRequestInAuditParms_Compute.Main</compute_expression>
+        </example>
+      </examples>
+    </rule>
+
+    <rule id="ES-02" severity="CRITICAL">
+      <title>ESQL module names must be globally unique within an ACE Application project</title>
+      <description>
+        See MF-08c for full rationale. Applies equally at the ESQL level.
+        All .esql files in a project share one compilation scope — duplicate module names
+        cause "Unable to locate URN" errors in the Toolkit.
+
+        RULE: Always prefix module names with the flow name.
+      </description>
+      <example><![CDATA[
+-- CurrentWeather.esql
+CREATE COMPUTE MODULE BuildCurrentWeatherRequest        -- CORRECT: flow-prefixed
+CREATE COMPUTE MODULE BuildCurrentWeatherErrorResponse  -- CORRECT: flow-prefixed
+
+-- WeatherAlerts.esql
+CREATE COMPUTE MODULE BuildWeatherAlertsRequest         -- CORRECT: flow-prefixed
+CREATE COMPUTE MODULE BuildWeatherAlertsErrorResponse   -- CORRECT: flow-prefixed
+
+-- WRONG: generic names that will collide if used in multiple flows
+CREATE COMPUTE MODULE BuildErrorResponse  -- AMBIGUOUS across flows
+CREATE COMPUTE MODULE SetHeaders          -- AMBIGUOUS across flows
+      ]]></example>
+    </rule>
+
+    <rule id="ES-03" severity="REQUIRED">
+      <title>File-scope declarations: BROKER SCHEMA, NAMESPACE, EXTERNAL, SHARED</title>
+      <description>
+        All DECLARE NAMESPACE, DECLARE ... EXTERNAL, and DECLARE ... SHARED statements
+        must appear at the top of the .esql file, OUTSIDE any module or procedure.
+      </description>
+      <template><![CDATA[
+-- No BROKER SCHEMA: file is at project root level (omit for root-level files)
+BROKER SCHEMA gen   -- include only when file is inside a subfolder
+
+-- Namespace aliases
+DECLARE ns1 NAMESPACE 'http://services.example.com/';
+
+-- EXTERNAL variables: correspond to subflow UDP properties (eStructuralFeatures)
+-- Configurable per-environment via properties files
+DECLARE BackendUrl   EXTERNAL CHARACTER 'http://default.example.com/api';
+DECLARE ApiKey       EXTERNAL CHARACTER '';
+
+-- SHARED variables: in-memory state shared across all message flow threads
+DECLARE CacheData          SHARED ROW;
+DECLARE LastCacheRefreshTs SHARED TIMESTAMP NULL;
+      ]]></template>
+    </rule>
+
+    <rule id="ES-04" severity="REQUIRED">
+      <title>Standard module header comment block</title>
+      <description>
+        Every CREATE COMPUTE MODULE must be preceded by a structured header comment.
+      </description>
+      <template><![CDATA[
+/*******************************************************************************
+* Node: NodeLabel
+* Module Name: ModuleName
+*
+* Description: What this module does.
+*
+* Ver   Author    Date        Description
+* ===   ======    ====        ===========
+* 1     Name      DD/MM/YYYY  Initial
+********************************************************************************/
+CREATE COMPUTE MODULE ModuleName
+      ]]></template>
+    </rule>
+
+    <rule id="ES-05" severity="REQUIRED">
+      <title>Every Compute module must include CopyMessageHeaders and CopyEntireMessage</title>
+      <description>
+        Include both helper procedures in every Compute module even if not explicitly called.
+        CopyMessageHeaders() copies all message tree headers (excludes body).
+        CopyEntireMessage() copies the complete message tree.
+        Use RETURN FALSE when the module uses explicit PROPAGATE TO TERMINAL statements.
+      </description>
+      <template><![CDATA[
+CREATE COMPUTE MODULE MyFlow_MyNode
+    CREATE FUNCTION Main() RETURNS BOOLEAN
+    BEGIN
+        -- main logic
+        RETURN TRUE;
+    END;
+
+    CREATE PROCEDURE CopyMessageHeaders() BEGIN
+        DECLARE I INTEGER 1;
+        DECLARE J INTEGER;
+        SET J = CARDINALITY(InputRoot.*[]);
+        WHILE I < J DO
+            SET OutputRoot.*[I] = InputRoot.*[I];
+            SET I = I + 1;
+        END WHILE;
+    END;
+
+    CREATE PROCEDURE CopyEntireMessage() BEGIN
+        SET OutputRoot = InputRoot;
+    END;
+END MODULE;
+      ]]></template>
+    </rule>
+
+    <rule id="ES-06" severity="REQUIRED">
+      <title>Reading HTTP query parameters in ESQL</title>
+      <description>
+        SOURCE OF TRUTH: https://www.ibm.com/docs/en/app-connect/13.0.x?topic=nodes-httpinput-node
+
+        PREREQUISITE: The HTTP Input node MUST have parseQueryString="true" in the .msgflow
+        (see MF-06b). Without it, all reads return NULL — no error is thrown.
+
+        CORRECT paths once parseQueryString="true" is set:
+          InputLocalEnvironment.HTTP.Input.QueryString.paramName
+
+        NEVER try to parse the query string manually from the HTTP command line.
+        The X-Original-HTTP-Command header contains an absolute URI format for localhost
+        requests (e.g. "GET http://localhost:7800/path HTTP/1.1" — NO query string),
+        so manual parsing is unreliable and unnecessary.
+
+        Path segments from wildcard URLs (URLSpecifier="/api/*") are at:
+          InputLocalEnvironment.HTTP.Input.Path.Segment[1]  (first segment after wildcard)
+          InputLocalEnvironment.HTTP.Input.Path.Segment[2]
+      </description>
+      <correct_example><![CDATA[
+-- Requires parseQueryString="true" on the HTTP Input node in the .msgflow
+SET location = COALESCE(InputLocalEnvironment.HTTP.Input.QueryString.location, '');
+SET units    = COALESCE(InputLocalEnvironment.HTTP.Input.QueryString.units, 'metric');
+      ]]></correct_example>
+      <wrong_example><![CDATA[
+-- WRONG: X-Original-HTTP-Command does NOT contain the query string for localhost requests
+SET httpCmd = InputRoot.HTTPInputHeader."X-Original-HTTP-Command";
+-- Returns "GET http://localhost:7800/path HTTP/1.1" — no ?param=value
+
+-- WRONG: QueryString child elements are NULL unless parseQueryString="true" is set
+SET location = InputLocalEnvironment.HTTP.Input.QueryString.location; -- NULL!
+      ]]></wrong_example>
+    </rule>
+
+    <rule id="ES-07" severity="REQUIRED">
+      <title>Dynamic URL routing to a backend HTTP service</title>
+      <description>
+        Set the full backend URL (including query string) on OutputLocalEnvironment before the
+        HTTP Request node. The HTTP Request node's URLSpecifier holds the static fallback URL
+        but the Destination.HTTP.RequestURL value is used at runtime.
+        Always set RETURN FALSE after explicit PROPAGATE TO TERMINAL calls.
+      </description>
+      <template><![CDATA[
+-- Build the complete backend URL including query parameters
+SET backendUrl = BackendBaseUrl || '?q=' || location || '&key=' || ApiKey;
+
+-- Set on OutputLocalEnvironment — the HTTP Request node picks this up at runtime
+SET OutputLocalEnvironment = InputLocalEnvironment;
+SET OutputLocalEnvironment.Destination.HTTP.RequestURL = backendUrl;
+SET OutputLocalEnvironment.Destination.HTTP.RequestLine.Method = 'GET';
+
+CALL CopyMessageHeaders();
+RETURN TRUE;
+      ]]></template>
+    </rule>
+
+    <rule id="ES-08" severity="REQUIRED">
+      <title>Handling the HTTP Request node error terminal in ESQL</title>
+      <description>
+        When the HTTP Request node's OutTerminal.error fires (backend returned 4xx/5xx),
+        InputLocalEnvironment is EMPTY (NULL root). Do NOT attempt to read from it.
+        The backend response data is carried in InputRoot:
+          InputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code"  — integer HTTP status
+          InputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Line"  — status line string
+          InputRoot.BLOB.BLOB                                          — response body as BLOB
+
+        To pass the backend's error response through to the client unchanged:
+      </description>
+      <template><![CDATA[
+CREATE COMPUTE MODULE MyFlow_ErrorHandler
+    CREATE FUNCTION Main() RETURNS BOOLEAN
+    BEGIN
+        DECLARE backendStatus INTEGER;
+
+        SET OutputLocalEnvironment = InputLocalEnvironment;
+
+        -- Read backend status from InputRoot (InputLocalEnvironment is empty on error terminal)
+        SET backendStatus = CAST(
+            InputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code" AS INTEGER
+        );
+
+        IF backendStatus IS NOT NULL AND backendStatus > 0 THEN
+            -- Pass the backend's response (status + body) straight through to the client
+            CREATE NEXTSIBLING OF OutputRoot.Properties DOMAIN 'HTTPResponseHeader';
+            SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code" = backendStatus;
+            SET OutputRoot.BLOB.BLOB = InputRoot.BLOB.BLOB;
+        ELSE
+            -- Flow-level failure (connection error, DNS failure, etc.)
+            CREATE NEXTSIBLING OF OutputRoot.Properties DOMAIN 'HTTPResponseHeader';
+            SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Line" = 'HTTP/1.1 500 Internal Server Error';
+            SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code" = 500;
+            SET OutputRoot.JSON.Data.error.code = 'BACKEND_ERROR';
+            SET OutputRoot.JSON.Data.error.message = COALESCE(
+                InputExceptionList.RecoverableException[1].Insert[1].Text,
+                'An unexpected error occurred calling the backend service.'
+            );
+        END IF;
+
+        RETURN TRUE;
+    END;
+
+    CREATE PROCEDURE CopyMessageHeaders() BEGIN
+        DECLARE I INTEGER 1;
+        DECLARE J INTEGER;
+        SET J = CARDINALITY(InputRoot.*[]);
+        WHILE I < J DO
+            SET OutputRoot.*[I] = InputRoot.*[I];
+            SET I = I + 1;
+        END WHILE;
+    END;
+
+    CREATE PROCEDURE CopyEntireMessage() BEGIN
+        SET OutputRoot = InputRoot;
+    END;
+END MODULE;
+      ]]></template>
+    </rule>
+
+    <rule id="ES-09" severity="REQUIRED">
+      <title>Returning HTTP error responses to the client</title>
+      <description>
+        To set the HTTP response status code in an outbound HTTP Reply, set these fields
+        BEFORE the HTTPReply node. The Toolkit uses X-Original-HTTP-Status-Code to control
+        the actual HTTP status returned to the caller.
+        Always CREATE the HTTPResponseHeader domain before setting fields on it.
+      </description>
+      <template><![CDATA[
+-- Return HTTP 400 Bad Request with a JSON error body
+CREATE NEXTSIBLING OF OutputRoot.Properties DOMAIN 'HTTPResponseHeader';
+SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Line" = 'HTTP/1.1 400 Bad Request';
+SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code" = 400;
+SET OutputRoot.JSON.Data.error.code = 'MISSING_PARAMETER';
+SET OutputRoot.JSON.Data.error.message = 'Required parameter "location" is missing.';
+
+-- Return HTTP 500 Internal Server Error with a JSON error body
+CREATE NEXTSIBLING OF OutputRoot.Properties DOMAIN 'HTTPResponseHeader';
+SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Line" = 'HTTP/1.1 500 Internal Server Error';
+SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code" = 500;
+SET OutputRoot.JSON.Data.error.code = 'SERVER_ERROR';
+SET OutputRoot.JSON.Data.error.message = 'An unexpected error occurred.';
+      ]]></template>
+    </rule>
+
+    <rule id="ES-10" severity="REQUIRED">
+      <title>REFERENCE variable pattern and SHARED cache with TTL</title>
+      <description>
+        Use REFERENCE variables to avoid repeating long path expressions.
+        Use SHARED ROW for in-memory caching of database lookups with timestamp-based TTL.
+      </description>
+      <patterns>
+        <pattern name="reference_to_subtree"><![CDATA[
+DECLARE inref  REFERENCE TO InputRoot.SOAP.Body.ns1:getExchangeRate;
+DECLARE outref REFERENCE TO OutputRoot.SOAP.Body.ns1:getExchangeRateResponse.return;
+        ]]></pattern>
+        <pattern name="iterate_repeating_elements"><![CDATA[
+DECLARE r_item REFERENCE TO InputRoot.SOAP.Body.ns:Response.Item[1];
+WHILE LASTMOVE(r_item) DO
+    SET outref.field = r_item.value;
+    CREATE NEXTSIBLING OF outref AS outref REPEAT;
+    MOVE r_item NEXTSIBLING;
+END WHILE;
+        ]]></pattern>
+        <pattern name="shared_cache_with_8h_ttl"><![CDATA[
+-- File-scope (outside modules)
+DECLARE CacheData          SHARED ROW;
+DECLARE LastCacheRefreshTs SHARED TIMESTAMP NULL;
+
+-- Cache expiry check (TTL = 8 hours = 28800 seconds)
+IF (LastCacheRefreshTs IS NULL OR
+    CAST((CURRENT_TIMESTAMP - LastCacheRefreshTs) SECOND AS FLOAT) > 28800) THEN
+    PROPAGATE TO TERMINAL 'out1';  -- route to cache-refresh Compute node
+END IF;
+
+-- Cache lookup using THE(SELECT ITEM ...)
+SET outField = THE(SELECT ITEM S.TargetCode
+                   FROM CacheData.Mappings.Data[] AS S
+                   WHERE S.SourceCode = inputValue);
+        ]]></pattern>
+      </patterns>
+    </rule>
+
+    <rule id="ES-11" severity="REQUIRED">
+      <title>PROPAGATE TO TERMINAL and RETURN FALSE pattern</title>
+      <description>
+        Use PROPAGATE TO TERMINAL when a Compute node needs to route to a non-default terminal
+        or to multiple terminals. Always follow with RETURN FALSE to prevent automatic
+        propagation to OutTerminal.out after the function body returns.
+      </description>
+      <template><![CDATA[
+CREATE FUNCTION Main() RETURNS BOOLEAN
+BEGIN
+    IF someCondition THEN
+        SET OutputLocalEnvironment.Destination.HTTP.RequestURL = urlA;
+        PROPAGATE TO TERMINAL 'out';   -- route to path A
+        RETURN FALSE;                  -- MUST follow: suppresses auto-propagate
+    ELSE
+        SET OutputLocalEnvironment.Destination.HTTP.RequestURL = urlB;
+        PROPAGATE TO TERMINAL 'out1';  -- route to path B (custom terminal)
+        RETURN FALSE;                  -- MUST follow
+    END IF;
+END;
+      ]]></template>
+    </rule>
+
+  </esql_file_structure>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       SECTION 3 — BUILD AND DEPLOYMENT
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <build_and_deployment>
+
+    <rule id="BD-01" severity="REQUIRED">
+      <title>BAR file build command (ibmint package)</title>
+      <description>
+        Use ibmint package to build a BAR file from an ACE Application project directory.
+        The ACE profile must be sourced first to put ibmint on the PATH.
+        Source: /Applications/IBM App Connect Enterprise/server/bin/mqsiprofile (macOS)
+      </description>
+      <command><![CDATA[
+source "/Applications/IBM App Connect Enterprise/server/bin/mqsiprofile"
+ibmint package \
+  --input-path /path/to/workspace/MyProject \
+  --output-bar-file /path/to/workspace/BARfiles/MyProject.bar
+      ]]></command>
+      <success_indicators>
+        BIP1859I: Successfully added file ... to the BAR file.  (one per source file)
+        BIP1853I: Application file 'MyProject.appzip' successfully added to the BAR file.
+        BIP8071I: Successful command completion.
+      </success_indicators>
+    </rule>
+
+    <rule id="BD-02" severity="REQUIRED">
+      <title>Deploy BAR to a running integration server via REST API</title>
+      <description>
+        The ACE admin REST API runs on HTTPS by default (use -sk for self-signed cert).
+        Default admin port is 7600. Deploy with a POST to /apiv2/deploy.
+      </description>
+      <command><![CDATA[
+curl -sk -X POST https://localhost:7600/apiv2/deploy \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @/path/to/BARfiles/MyProject.bar \
+  -w "\nHTTP:%{http_code}"
+      ]]></command>
+      <success_indicators>
+        BIP9332I: Application 'MyProject' has been created successfully.   (first deploy)
+        BIP9332I: Application 'MyProject' has been changed successfully.   (redeploy)
+        BIP9326I: The source has been successfully deployed.
+        HTTP:200
+      </success_indicators>
+    </rule>
+
+    <rule id="BD-03" severity="REQUIRED">
+      <title>Integration server HTTP listener ports</title>
+      <description>
+        The ACE integration server uses separate ports for admin and application HTTP traffic.
+        Always confirm the actual ports before testing — they can be overridden in
+        server.conf.yaml or via mqsichangeproperties.
+      </description>
+      <default_ports>
+        <port purpose="Admin REST API (HTTPS)"  default="7600"  config_key="RestAdminListener.port"/>
+        <port purpose="Application HTTP flows"  default="7800"  config_key="ResourceManagers.HTTPConnector.ListenerPort"/>
+        <port purpose="Application HTTPS flows" default="7843"  config_key="ResourceManagers.HTTPSConnector.ListenerPort"/>
+      </default_ports>
+      <note>
+        HTTP Input flows are always reached on the application HTTP port (7800 by default),
+        NOT the admin port (7600). The admin port is for deployment and management only.
+        Confirm the actual listening port from the server log:
+          BIP3132I: The HTTP Listener has started listening on port '7800' for 'http' connections.
+      </note>
+    </rule>
+
+    <rule id="BD-04" severity="REQUIRED">
+      <title>Diagnosing runtime failures using ACE user trace</title>
+      <description>
+        When a flow behaves unexpectedly at runtime, enable user trace via the admin REST API.
+        The trace file is written to:
+          TEST_SERVER/config/common/log/integration_server.TEST_SERVER.userTrace.0.txt
+
+        debugTree level shows full ESQL expression evaluations including variable values.
+        This is the definitive way to diagnose wrong ESQL paths, NULL variables, and
+        unexpected terminal routing.
+      </description>
+      <commands><![CDATA[
+# Enable debug-level user trace
+curl -sk -X POST https://localhost:7600/apiv2/start-user-trace \
+  -H "Content-Type: application/json" \
+  -d '{"traceLevel":"debugTree"}'
+
+# Make a test request to capture in the trace
+curl -s "http://localhost:7800/my/endpoint?param=value"
+
+# Stop user trace
+curl -sk -X POST https://localhost:7600/apiv2/stop-user-trace \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# Read the trace
+cat TEST_SERVER/config/common/log/integration_server.TEST_SERVER.userTrace.0.txt
+      ]]></commands>
+      <key_trace_messages>
+        <message id="BIP2539I">Expression evaluation result — shows what a variable resolved to</message>
+        <message id="BIP2543W">Navigation failed — path element does not exist (field is NULL)</message>
+        <message id="BIP2566I">Assignment — shows value written to a field</message>
+        <message id="BIP3633I">HTTP Request node sending data — shows host and URL path</message>
+        <message id="BIP3634I">HTTP Request node received response — shows HTTP status code</message>
+        <message id="BIP4008I">Message propagated to named terminal (e.g. error, out, failure)</message>
+        <message id="BIP4015I">Message propagated from Compute node out terminal</message>
+        <message id="BIP4016I">Message propagated via PROPAGATE TO TERMINAL</message>
+        <message id="BIP11516I">HTTP Input node received request — shows method and path</message>
+      </key_trace_messages>
+    </rule>
+
+  </build_and_deployment>
+
+</msgflow_xml_and_esql_schema>

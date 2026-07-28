@@ -1,0 +1,110 @@
+<ace_testing_guidance>
+  <overview>
+    Testing guidance for ACE integration projects. Testing must be completed before
+    a development task is considered done. Use both positive and negative test cases.
+  </overview>
+
+  <test_categories>
+    <category name="Unit_Testing">
+      <description>Test individual message flows or ESQL modules in isolation.</description>
+      <tools>
+        <tool>ACE Toolkit Test Suite (ComIbmMQInput test nodes for unit test flows)</tool>
+        <tool>SoapUI projects (found in *_SOAPUI_Project directories in this workspace)</tool>
+        <tool>curl or Postman for REST/HTTP endpoint testing</tool>
+      </tools>
+      <checklist>
+        <item>Positive case: valid request → expected response (HTTP 200 / SOAP success)</item>
+        <item>Missing required fields: service returns appropriate error code and message</item>
+        <item>Invalid field values: service rejects and returns validation error</item>
+        <item>Malformed XML/JSON: service catches parse error and returns error response</item>
+        <item>Backend timeout: flow returns timeout error message to caller</item>
+        <item>Backend returns HTTP 500: flow handles upstream error correctly</item>
+      </checklist>
+    </category>
+
+    <category name="Integration_Testing">
+      <description>Test the flow end-to-end with real or stub backend systems.</description>
+      <checklist>
+        <item>HTTP input to HTTP request to HTTP reply — full round trip</item>
+        <item>Audit messages written to audit MQ queue (if applicable)</item>
+        <item>Database records created/updated correctly</item>
+        <item>Email notifications sent on error conditions</item>
+        <item>Properties files loaded correctly for target environment</item>
+      </checklist>
+    </category>
+  </test_categories>
+
+  <using_soapui_projects>
+    <description>This workspace contains SoapUI project files for most services.
+    Locate the relevant *_SOAPUI_Project directory and use the test cases defined there.</description>
+    <steps>
+      <step>Find the SoapUI project XML file in the *_SOAPUI_Project directory.</step>
+      <step>Open in SoapUI (or SoapUI Open Source).</step>
+      <step>Set the service endpoint in the project properties to match the target
+      ACE integration server URL (e.g., http://localhost:7080/ServiceName).</step>
+      <step>Run the existing test cases.</step>
+      <step>Add new test cases for any new operations developed.</step>
+      <step>Verify responses match expected WSDL/schema structure.</step>
+    </steps>
+  </using_soapui_projects>
+
+  <error_path_testing>
+    <test_case name="SOAP_Fault_on_backend_error">
+      <description>Simulate a backend HTTP 500. Verify the service returns a SOAP fault
+      with the expected faultcode and faultstring.</description>
+      <expected_behaviour>HTTP 500 response with SOAP Envelope containing ns:Fault element</expected_behaviour>
+    </test_case>
+    <test_case name="Timeout_handling">
+      <description>Simulate a slow backend (delay > timeoutForServer). Verify the service
+      returns a timeout error message and the audit record shows 'Failure' status.</description>
+      <expected_behaviour>HTTP 500 response with timeout-specific message</expected_behaviour>
+    </test_case>
+    <test_case name="Invalid_endpoint">
+      <description>For gateway flows: call an endpoint not in the routing table.
+      Verify the service returns a clear error saying the endpoint is unknown.</description>
+    </test_case>
+    <test_case name="Schema_validation_failure">
+      <description>Submit a SOAP request that violates the WSDL schema (missing element,
+      wrong type). Verify the Validate node catches it and returns a validation error.</description>
+    </test_case>
+  </error_path_testing>
+
+  <ace_command_line_testing>
+    <description>ACE provides command-line tools for testing without the Toolkit.</description>
+    <commands>
+      <command name="IntegrationServer_start">
+        <syntax>IntegrationServer --name MyServer --work-dir /path/to/workdir</syntax>
+        <description>Start a standalone integration server for testing</description>
+      </command>
+      <command name="mqsibar_deploy">
+        <syntax>mqsibar -a myapp.bar -c -e MyServer</syntax>
+        <description>Deploy a BAR file to the integration server</description>
+      </command>
+      <command name="mqsichangeproperties">
+        <syntax>mqsichangeproperties MyBroker -e MyServer -o MyFlow -n property -v value</syntax>
+        <description>Change a User-Defined Property value at runtime</description>
+      </command>
+      <command name="ibmint_test">
+        <syntax>ibmint test --work-directory testdir</syntax>
+        <description>Run ACE unit tests defined in the test project</description>
+      </command>
+    </commands>
+  </ace_command_line_testing>
+
+  <validation_checklist>
+    <pre_test>
+      <item>ACE integration server is running</item>
+      <item>BAR file deployed successfully (no deployment errors in system log)</item>
+      <item>Properties file for target environment applied</item>
+      <item>Backend systems reachable from the ACE server</item>
+    </pre_test>
+    <post_test>
+      <item>All positive test cases pass</item>
+      <item>All negative/error test cases produce expected error responses</item>
+      <item>No unexpected exceptions in the ACE system log</item>
+      <item>Audit records written correctly (if applicable)</item>
+      <item>No memory leaks or performance degradation under load</item>
+    </post_test>
+  </validation_checklist>
+
+</ace_testing_guidance>

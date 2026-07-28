@@ -1,0 +1,152 @@
+<project_structure_examples>
+  <overview>
+    Reference project structures derived from real ACE projects in this workspace.
+    All client-specific names have been replaced with generic equivalents.
+    Use these as templates for creating new ACE projects.
+  </overview>
+
+  <structure name="Service_App_with_Shared_Lib">
+    <description>The most common pattern: a deployable Application project that references
+    a shared Library project. The Library contains reusable subflows, ESQL procedures,
+    and Java utilities. The Application contains the service-specific message flows.</description>
+    <layout>
+      <directory name="MyService">
+        <file>.project (applicationNature)</file>
+        <file>application.descriptor</file>
+        <file>.settings/org.eclipse.core.resources.prefs</file>
+        <file>pom.xml (for Maven build)</file>
+        <directory name="com/company/esb">
+          <file>MyService_Flow.msgflow</file>
+          <file>MyService_Flow.esql</file>
+          <file>MyService_SubFlow.subflow</file>
+          <file>MyService_SubFlow.esql</file>
+        </directory>
+        <directory name="properties">
+          <file>DEV.properties</file>
+          <file>QA.properties</file>
+          <file>UAT.properties</file>
+          <file>PROD.properties</file>
+        </directory>
+      </directory>
+      <directory name="MyService.Lib">
+        <file>.project (libraryNature)</file>
+        <file>library.descriptor</file>
+        <directory name="com/company/esb/common">
+          <file>Error_SubFlow.subflow</file>
+          <file>Error_SubFlow.esql</file>
+          <file>Audit_SubFlow.subflow</file>
+          <file>Audit_SubFlow.esql</file>
+          <file>Common_Procs.esql</file>
+          <file>MyJavaHelper.java</file>
+        </directory>
+        <directory name="properties">
+          <file>DEV.properties</file>
+          <file>QA.properties</file>
+          <file>UAT.properties</file>
+          <file>PROD.properties</file>
+        </directory>
+      </directory>
+    </layout>
+  </structure>
+
+  <structure name="WSDL_Service_Project">
+    <description>A WSDL-driven service project generated from a WSDL definition.
+    ACE generates message flows, ESQL, and handler subflows automatically.
+    Custom logic is added by modifying the generated ESQL.</description>
+    <layout>
+      <directory name="MyWebService_Service">
+        <file>.project</file>
+        <file>service.descriptor</file>
+        <file>pom.xml</file>
+        <directory name="RemoteFiles">
+          <file>MyWebService.wsdl</file>
+          <file>MyWebService.xsd</file>
+          <file>MyWebService_InlineSchema1.xsd</file>
+        </directory>
+        <directory name="IBMdefined">
+          <file>soap.xsd</file>
+          <directory name="org/xmlsoap/schemas/soap/envelope">
+            <file>soapenv11.xsd</file>
+          </directory>
+        </directory>
+        <directory name="gen">
+          <file>MyWebService_Service.msgflow</file>
+          <file>MyWebService_Service.esql</file>
+          <file>MyWebService_ServiceInputCatchHandler.subflow</file>
+          <file>MyWebService_ServiceInputFailureHandler.subflow</file>
+          <file>MyWebService_ServiceInputHTTPTimeoutHandler.subflow</file>
+          <file>operationName_Request_Response.subflow</file>
+          <file>operationName_Request_Response.esql</file>
+        </directory>
+        <directory name="properties">
+          <file>DEV.properties</file>
+          <file>QA.properties</file>
+          <file>UAT.properties</file>
+          <file>PROD.properties</file>
+        </directory>
+      </directory>
+    </layout>
+    <notes>
+      <note>The gen/ directory is generated — add custom logic to the ESQL files,
+      not to the .msgflow (which may be regenerated).</note>
+      <note>The CatchHandler, FailureHandler, and HTTPTimeoutHandler subflows handle
+      errors from the input node — always connect to a shared error handler subflow.</note>
+    </notes>
+  </structure>
+
+  <structure name="Gateway_Proxy_Service">
+    <description>A gateway/proxy service that routes requests to backend services based
+    on a routing table. Uses SHARED ROW caching to avoid repeated DB lookups.
+    Supports multiple HTTP methods (GET/POST/PUT/DELETE).</description>
+    <key_flow_nodes>
+      <node>HTTP Input — accepts all inbound requests on /* or /gateway/*</node>
+      <node>FlowOrder — sequences audit logging (first) and main processing (second)</node>
+      <node>Compute (SetAuditParams) — initialises correlation IDs and audit environment</node>
+      <node>Compute (CheckPing) — short-circuits health-check requests immediately</node>
+      <node>Filter (IsCacheExpired) — checks if routing cache needs refresh</node>
+      <node>FlowOrder (DBCall) — sequences cache refresh (second) after audit log (first)</node>
+      <node>Compute (RefreshCache, dataSource=routingdb) — queries routing table into SHARED ROW</node>
+      <node>SubFlow (RoutingTable) — looks up internal URL and forwards request</node>
+      <node>HTTP Reply — returns response to caller</node>
+      <node>SubFlow (ApplicationError) — handles all catch/failure paths</node>
+    </key_flow_nodes>
+  </structure>
+
+  <structure name="File_Batch_Processing_Service">
+    <description>A batch integration that reads files from a directory, processes each
+    record, calls a backend system, and writes output/audit files.</description>
+    <key_flow_nodes>
+      <node>TimeoutNotification — fires at scheduled time (e.g., daily at 07:00)</node>
+      <node>Compute (ScheduleNext) — sets next run date/time in OutputLocalEnvironment</node>
+      <node>TimeoutControl — re-schedules for next run</node>
+      <node>Compute (FindFiles) — calls Java utility to list files in input directory</node>
+      <node>Compute (ProcessFile) — reads file, transforms content, calls backend</node>
+      <node>HTTP Request — calls backend service with transformed payload</node>
+      <node>Compute (ProcessResponse) — handles backend response</node>
+      <node>MQ Output / File Output — writes results</node>
+      <node>SubFlow (ErrorHandler) — on any failure, emails alert and logs to system log</node>
+    </key_flow_nodes>
+  </structure>
+
+  <property_file_template>
+    <description>Template for environment-specific properties files.
+    Replace placeholder values with environment-specific configuration.</description>
+    <content><![CDATA[
+# Flow performance settings
+com.company.esb.MyService_Flow#additionalInstances = 10
+
+# Input node timeout (seconds)
+com.company.esb.MyService_Flow#HTTPInput.timeoutForClient = 300
+
+# Backend HTTP request timeout (seconds)
+com.company.esb.MyService_Flow#BackendRequest.timeoutForServer = 120
+
+# Email notification settings (UDP)
+com.company.esb.MyService_Flow#ErrorHandler_SubFlow.SendMail = YES
+com.company.esb.MyService_Flow#ErrorHandler_SubFlow.EmailTo = integration-support@example.com
+com.company.esb.MyService_Flow#ErrorHandler_SubFlow.EmailFrom = esb-monitor
+com.company.esb.MyService_Flow#ErrorHandler_SubFlow.smtpServer = mailrelay.example.com
+    ]]></content>
+  </property_file_template>
+
+</project_structure_examples>

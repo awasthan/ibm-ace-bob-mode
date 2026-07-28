@@ -1,0 +1,199 @@
+<ace_best_practices>
+
+  <esql_conventions>
+    <convention name="module_header_comment">
+      <rule>Every CREATE COMPUTE MODULE and CREATE FILTER MODULE must start with a structured
+      header comment documenting the node name, description, and version history.</rule>
+      <template><![CDATA[
+/*******************************************************************************
+* Node: <NodeName>_Compute
+* Module Name: <NodeName>_Compute
+*
+* Description: <What this module does>
+*
+* Ver    Author    Date        Description
+* ===    ======    ====        ===========
+* 1      <author>  DD/MM/YYYY  Initial
+********************************************************************************/
+CREATE COMPUTE MODULE <NodeName>_Compute
+  CREATE FUNCTION Main() RETURNS BOOLEAN
+  BEGIN
+    -- implementation
+    RETURN TRUE;
+  END;
+
+  CREATE PROCEDURE CopyMessageHeaders() BEGIN
+    DECLARE I INTEGER 1;
+    DECLARE J INTEGER;
+    SET J = CARDINALITY(InputRoot.*[]);
+    WHILE I < J DO
+      SET OutputRoot.*[I] = InputRoot.*[I];
+      SET I = I + 1;
+    END WHILE;
+  END;
+
+  CREATE PROCEDURE CopyEntireMessage() BEGIN
+    SET OutputRoot = InputRoot;
+  END;
+END MODULE;
+      ]]></template>
+    </convention>
+
+    <convention name="copy_procedures">
+      <rule>Always include CopyMessageHeaders() and CopyEntireMessage() helper procedures
+      in every Compute/Filter module — they are used in nearly every module.</rule>
+      <rule>Call CopyEntireMessage() at the top of Main() before making changes, or call
+      CopyMessageHeaders() when only copying headers and constructing a new body.</rule>
+    </convention>
+
+    <convention name="broker_schema">
+      <rule>Every ESQL file must start with BROKER SCHEMA declaration matching the
+      Java package path of the file. Example: BROKER SCHEMA com.company.esb</rule>
+      <rule>Use a PATH statement when referencing procedures from other ESQL files in a
+      shared library: PATH com.company.esb.common;</rule>
+    </convention>
+
+    <convention name="variable_declaration">
+      <rule>Declare all local variables at the top of a function/procedure with DECLARE.</rule>
+      <rule>Use SHARED variables (DECLARE x SHARED CHARACTER '') for state shared across
+      multiple messages — but use with caution as they persist across message processing.</rule>
+      <rule>Use EXTERNAL variables (DECLARE x EXTERNAL CHARACTER 'default') for User-Defined
+      Properties (UDPs) that can be configured per-environment in properties files.</rule>
+    </convention>
+
+    <convention name="null_handling">
+      <rule>Always use COALESCE() when reading values that might be NULL to avoid
+      null propagation in string operations.</rule>
+      <rule>Use FIELDTYPE() to test whether a field exists before reading it.
+      Example: IF FIELDTYPE(Environment.Variables.myField) IS NULL THEN</rule>
+      <rule>Use EXISTS() to check for the presence of an element:
+      IF EXISTS(OutputRoot.HTTPRequestHeader.MyHeader[]) THEN</rule>
+    </convention>
+
+    <convention name="error_handling">
+      <rule>For anticipated errors (business validation failures), set the fault code and
+      message in Environment variables before throwing:
+        SET Environment.Variables.SOAPFault.faultcode = 'SVC001';
+        SET Environment.Variables.SOAPFault.faultstring = 'Policy not found';
+        THROW USER EXCEPTION VALUES('Description');
+      </rule>
+      <rule>For SOAP services, return HTTP 500 with a SOAP Fault in the error response.
+      Set OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code" = 500.</rule>
+      <rule>For JSON/REST services, return HTTP 500 with a JSON error body.</rule>
+      <rule>Always include a timeout handler that returns a meaningful error to the caller.</rule>
+    </convention>
+
+    <convention name="propagate_usage">
+      <rule>Use PROPAGATE TO TERMINAL 'terminalName' DELETE NONE when propagating to
+      multiple terminals and the message must be preserved for subsequent propagations.</rule>
+      <rule>Use RETURN FALSE to suppress default propagation after explicit PROPAGATEs.</rule>
+      <rule>Use RETURN TRUE to let the message flow to the default 'out' terminal.</rule>
+    </convention>
+
+    <convention name="environment_tree">
+      <rule>Use the Environment message tree to pass state between nodes in a flow.
+      Prefix all custom environment variables under Environment.Variables to keep
+      them organized. Example: Environment.Variables.ServiceContext.PolicyNumber</rule>
+      <rule>Use Environment.Variables.WMB.Audit for audit-related fields, following the
+      established pattern in the shared services library.</rule>
+      <rule>Clean up large data from Environment when no longer needed to avoid memory waste.</rule>
+    </convention>
+
+    <convention name="database_access">
+      <rule>Always use parameterised queries (PASSTHRU with ? placeholders) rather than
+      string concatenation to build SQL — prevents SQL injection.</rule>
+      <rule>Declare an EXIT HANDLER FOR SQLSTATE to catch database errors gracefully.</rule>
+      <rule>Cache database lookups in SHARED ROW variables when the data changes infrequently,
+      with a timestamp-based expiry mechanism.</rule>
+    </convention>
+  </esql_conventions>
+
+  <msgflow_conventions>
+    <convention name="naming">
+      <rule>Message flow files: ServiceName_Flow.msgflow or ServiceName_SubFlow.subflow</rule>
+      <rule>Subflow files: FunctionName_SubFlow.subflow</rule>
+      <rule>Node labels in a flow: NodeFunction_NodeType. Example: ValidateInput_Compute,
+      RouteToBackend_Filter, ErrorHandler_SubFlow</rule>
+      <rule>ESQL module names must match the node label they are associated with.</rule>
+    </convention>
+
+    <convention name="error_handler_pattern">
+      <rule>Every service flow must have an error handler subflow connected to the
+      catch terminal of the input node AND the catch/failure terminals of HTTP Request nodes.</rule>
+      <rule>Use a shared Error_SubFlow from the library rather than duplicating error
+      handling logic in every flow.</rule>
+    </convention>
+
+    <convention name="audit_pattern">
+      <rule>Use FlowOrder nodes to sequence audit logging so audit messages are sent
+      before and after key processing steps without blocking the main flow.</rule>
+      <rule>Connect audit subflow outputs without any downstream nodes — audit
+      messages are fire-and-forget via MQ to an audit queue.</rule>
+    </convention>
+  </msgflow_conventions>
+
+  <properties_file_conventions>
+    <convention name="structure">
+      <rule>Create separate properties files for each environment:
+      DEV.properties, QA.properties, UAT.properties, PROD.properties</rule>
+      <rule>Property keys follow the format:
+      BrokerSchema.FlowName#NodeLabel.propertyName</rule>
+      <example>
+        com.company.esb.MyService_Flow#additionalInstances = 10
+        com.company.esb.MyService_Flow#HTTPInput.timeoutForClient = 300
+        com.company.esb.MyService_Flow#ErrorHandler_SubFlow.EmailTo = support@example.com
+        com.company.esb.MyService_Flow#ErrorHandler_SubFlow.smtpServer = mailrelay.example.com
+      </example>
+    </convention>
+    <convention name="environment_differences">
+      <rule>Never hardcode environment-specific values (URLs, queue names, email addresses)
+      in ESQL — always use EXTERNAL variables configured via properties files.</rule>
+      <rule>Performance tuning properties (additionalInstances, timeouts) must differ
+      between environments — DEV should have lower values than PROD.</rule>
+    </convention>
+  </properties_file_conventions>
+
+  <java_compute_conventions>
+    <convention name="when_to_use_java">
+      <rule>Use JavaCompute nodes for: complex string manipulation (byte-level operations),
+      file system operations, calling third-party Java libraries, UUID generation,
+      sending emails via JavaMail.</rule>
+      <rule>Prefer ESQL for: message transformation, routing, database access, and
+      simple string operations — it is simpler to maintain.</rule>
+    </convention>
+    <convention name="java_esql_bridge">
+      <rule>To call Java from ESQL, declare the Java method as an ESQL external procedure:
+        CREATE PROCEDURE MyJavaProc(IN param CHARACTER)
+          LANGUAGE JAVA
+          EXTERNAL NAME "com.company.esb.MyClass.myMethod";
+      </rule>
+      <rule>Java methods called from ESQL must be public static and use supported types
+      (String, int, long, float, double, MbElement for tree references).</rule>
+    </convention>
+  </java_compute_conventions>
+
+  <quality_checklist>
+    <pre_development>
+      <item>ace-bob skill activated</item>
+      <item>Requirements understood: protocol, format, transformation, error handling</item>
+      <item>Project type determined (App/Lib/Service)</item>
+    </pre_development>
+    <during_development>
+      <item>Every .msgflow has correct xmi:type from ace-bob skill (not copied from examples)</item>
+      <item>BROKER SCHEMA declaration matches file path</item>
+      <item>CopyMessageHeaders() / CopyEntireMessage() included in every module</item>
+      <item>COALESCE() used for all nullable field reads</item>
+      <item>Error handler connected to all catch/failure terminals</item>
+      <item>EXTERNAL variables used for all environment-specific values</item>
+    </during_development>
+    <before_completion>
+      <item>All four environment properties files created and populated</item>
+      <item>Error paths tested with invalid inputs</item>
+      <item>Timeout handling verified</item>
+      <item>No hardcoded environment-specific values in ESQL</item>
+      <item>No client-specific names used in code (use generic names like ServiceConsumer,
+      BackendSystem, IntegrationService)</item>
+    </before_completion>
+  </quality_checklist>
+
+</ace_best_practices>

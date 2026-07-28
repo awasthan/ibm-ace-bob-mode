@@ -1,0 +1,363 @@
+<esql_patterns>
+  <overview>
+    Reusable ESQL patterns derived from production ACE integration projects.
+    All client-specific names have been replaced with generic equivalents.
+    Always use these patterns as a starting point for new development.
+  </overview>
+
+  <pattern name="shared_cache_with_expiry">
+    <description>Cache database lookup results in a SHARED ROW variable with a 10-minute
+    TTL. Avoids querying the database on every message while keeping data reasonably fresh.
+    Used in gateway/routing services.</description>
+    <code><![CDATA[
+BROKER SCHEMA com.company.esb
+
+-- Holds cached data; populated from database on first use or after TTL expiry
+DECLARE CacheRoutingTable SHARED ROW;
+-- Timestamp of last cache refresh; NULL means cache is unpopulated
+DECLARE LastCacheRefreshTime SHARED TIMESTAMP NULL;
+
+-- Filter module: returns TRUE if cache needs refreshing (NULL or older than 600 seconds)
+CREATE FILTER MODULE IsCacheExpired_Filter
+  CREATE FUNCTION Main() RETURNS BOOLEAN
+  BEGIN
+    IF (LastCacheRefreshTime IS NULL OR
+        (CAST((CURRENT_TIMESTAMP - LastCacheRefreshTime) SECOND AS FLOAT) > 600)) THEN
+      RETURN TRUE;   -- Cache stale or absent: refresh needed
+    ELSE
+      RETURN FALSE;  -- Cache current: skip refresh
+    END IF;
+  END;
+END MODULE;
+
+-- Compute module: refreshes the cache from the database
+CREATE COMPUTE MODULE RefreshCache_Compute
+  CREATE FUNCTION Main() RETURNS BOOLEAN
+  BEGIN
+    SET LastCacheRefreshTime = CURRENT_TIMESTAMP;
+    -- Load all routing entries into the shared cache
+    SET CacheRoutingTable.Data[] =
+      SELECT S.EXTERNAL_REF, S.INTERNAL_URL, S.IS_ENABLED
+      FROM Database.{'mydb'}.{'dbo'}.{'ROUTING_TABLE'} AS S;
+    CALL CopyEntireMessage();
+    RETURN TRUE;
+  END;
+
+  CREATE PROCEDURE CopyEntireMessage() BEGIN
+    SET OutputRoot = InputRoot;
+  END;
+END MODULE;
+
+-- Compute module: looks up internal URL from the cache
+CREATE COMPUTE MODULE RouteRequest_Compute
+  CREATE FUNCTION Main() RETURNS BOOLEAN
+  BEGIN
+    DECLARE externalRef, internalUrl CHARACTER;
+    SET externalRef = COALESCE(Environment.Variables.ExternalRef, '');
+
+    SET Environment.Variables.RouteEntry =
+      THE(SELECT S.INTERNAL_URL, S.IS_ENABLED
+          FROM CacheRoutingTable.Data[] AS S
+          WHERE S.EXTERNAL_REF = externalRef);
+
+    SET internalUrl = Environment.Variables.RouteEntry.INTERNAL_URL;
+    IF internalUrl IS NULL THEN
+      THROW USER EXCEPTION VALUES('No routing entry found for: ' || externalRef);
+    END IF;
+
+    CALL CopyEntireMessage();
+    SET OutputLocalEnvironment.Destination.HTTP.RequestURL = internalUrl;
+    RETURN TRUE;
+  END;
+
+  CREATE PROCEDURE CopyEntireMessage() BEGIN
+    SET OutputRoot = InputRoot;
+  END;
+END MODULE;
+    ]]></code>
+  </pattern>
+
+  <pattern name="soap_fault_error_response">
+    <description>Prepare a SOAP fault response for error conditions. Sets HTTP 500
+    status and SOAP fault body. Checks for anticipated faultcode/faultstring set
+    earlier in the flow, falls back to a generic message.</description>
+    <code><![CDATA[
+DECLARE ns NAMESPACE 'http://schemas.xmlsoap.org/soap/envelope/';
+
+CREATE COMPUTE MODULE PrepareSOAPFaultResponse_Compute
+  CREATE FUNCTION Main() RETURNS BOOLEAN
+  BEGIN
+    SET OutputLocalEnvironment = InputLocalEnvironment;
+
+    -- Set HTTP 500 error status
+    CREATE NEXTSIBLING OF OutputRoot.Properties DOMAIN 'HTTPResponseHeader';
+    SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Line" = 'HTTP/1.1 500 Internal Error';
+    SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code" = 500;
+
+    -- Use anticipated fault details if set, otherwise use a generic message
+    IF Environment.Variables.SOAPFault.faultcode IS NOT NULL
+       AND Environment.Variables.SOAPFault.faultcode <> '' THEN
+      SET OutputRoot.XMLNSC.ns:Envelope.ns:Body.ns:Fault.faultcode =
+          Environment.Variables.SOAPFault.faultcode;
+      SET OutputRoot.XMLNSC.ns:Envelope.ns:Body.ns:Fault.faultstring =
+          Environment.Variables.SOAPFault.faultstring;
+    ELSEIF Environment.Variables.WMB.Audit.ErrorDetail IS NOT NULL
+           AND Environment.Variables.WMB.Audit.ErrorDetail <> '' THEN
+      SET OutputRoot.XMLNSC.ns:Envelope.ns:Body.ns:Fault.faultcode = 'SVC001';
+      SET OutputRoot.XMLNSC.ns:Envelope.ns:Body.ns:Fault.faultstring =
+          Environment.Variables.WMB.Audit.ErrorDetail;
+    ELSE
+      SET OutputRoot.XMLNSC.ns:Envelope.ns:Body.ns:Fault.faultcode = 'SVC001';
+      SET OutputRoot.XMLNSC.ns:Envelope.ns:Body.ns:Fault.faultstring =
+          'An unexpected error occurred. Please contact the integration support team.';
+    END IF;
+
+    RETURN TRUE;
+  END;
+
+  CREATE PROCEDURE CopyEntireMessage() BEGIN
+    SET OutputRoot = InputRoot;
+  END;
+END MODULE;
+    ]]></code>
+  </pattern>
+
+  <pattern name="json_error_response">
+    <description>Prepare a JSON error response for REST/HTTP services. Use when the
+    incoming request was JSON-formatted (detected from message parser domain).</description>
+    <code><![CDATA[
+CREATE COMPUTE MODULE PrepareJSONErrorResponse_Compute
+  CREATE FUNCTION Main() RETURNS BOOLEAN
+  BEGIN
+    SET OutputLocalEnvironment = InputLocalEnvironment;
+
+    CREATE NEXTSIBLING OF OutputRoot.Properties DOMAIN 'HTTPResponseHeader';
+    SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Line" = 'HTTP/1.1 500 Internal Error';
+    SET OutputRoot.HTTPResponseHeader."X-Original-HTTP-Status-Code" = 500;
+
+    IF Environment.Variables.SOAPFault.faultcode IS NOT NULL
+       AND Environment.Variables.SOAPFault.faultcode <> '' THEN
+      SET OutputRoot.JSON.Data.error.code = Environment.Variables.SOAPFault.faultcode;
+      SET OutputRoot.JSON.Data.error.message = Environment.Variables.SOAPFault.faultstring;
+    ELSE
+      SET OutputRoot.JSON.Data.error.code = 'SVC001';
+      SET OutputRoot.JSON.Data.error.message =
+          'An unexpected error occurred. Please contact the integration support team.';
+    END IF;
+
+    RETURN TRUE;
+  END;
+END MODULE;
+    ]]></code>
+  </pattern>
+
+  <pattern name="audit_environment_setup">
+    <description>Populate the standard audit fields in the Environment tree. Call
+    BuildAudit() from the shared library, then add service-specific fields.
+    This pattern is used at the start of every service flow to initialise
+    correlation tracking and auditing.</description>
+    <code><![CDATA[
+CREATE COMPUTE MODULE SetAuditParameters_Compute
+  CREATE FUNCTION Main() RETURNS BOOLEAN
+  BEGIN
+    DECLARE externalRef, httpCommand CHARACTER;
+    DECLARE thirdSlashPos, firstSpace, secondSpace INTEGER;
+
+    CALL CopyEntireMessage();
+
+    -- Derive correlation ID: prefer consumer-supplied ID, fall back to request identifier
+    SET Environment.Variables.WMB.Audit.MsgId =
+        COALESCE(InputRoot.HTTPInputHeader.CorrelationId,
+                 InputLocalEnvironment.Destination.HTTP.RequestIdentifier);
+    SET Environment.Variables.WMB.Audit.CorrelId =
+        Environment.Variables.WMB.Audit.MsgId;
+    SET Environment.Variables.WMB.Audit.Status = 'Success';
+
+    -- Extract the service endpoint from the HTTP command line
+    -- Format: "GET /basepath/ServiceName HTTP/1.1"
+    SET httpCommand = InputRoot.HTTPInputHeader."X-Original-HTTP-Command";
+    SET thirdSlashPos = POSITION('/' IN httpCommand REPEAT 3);
+    SET firstSpace   = POSITION(' ' IN httpCommand);
+    SET secondSpace  = POSITION(' ' IN httpCommand REPEAT 2);
+    SET externalRef  = SUBSTRING(httpCommand FROM thirdSlashPos+1
+                                 FOR secondSpace-thirdSlashPos-1);
+
+    SET Environment.Variables.ExternalRef = externalRef;
+    SET Environment.Variables.WMB.Audit.Keydata = 'endpoint|' || externalRef;
+    SET Environment.Variables.WMB.Audit.Keydata2 =
+        'ConsumerId|' || COALESCE(InputRoot.HTTPInputHeader.ConsumerId, '');
+    SET Environment.Variables.WMB.Audit.MQMDTimeStamp =
+        CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd HH:mm:ss.sss');
+    SET Environment.Variables.WMB.Audit.FlowStartTimeStamp =
+        CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd HH:mm:ss.sss');
+
+    RETURN TRUE;
+  END;
+
+  CREATE PROCEDURE CopyEntireMessage() BEGIN
+    SET OutputRoot = InputRoot;
+  END;
+END MODULE;
+    ]]></code>
+  </pattern>
+
+  <pattern name="database_insert_with_error_handler">
+    <description>Insert a record into a database table using PASSTHRU with parameterised
+    values. Declare an EXIT HANDLER to catch and flag database failures without
+    crashing the main flow.</description>
+    <code><![CDATA[
+CREATE COMPUTE MODULE PersistRecord_Compute
+  CREATE FUNCTION Main() RETURNS BOOLEAN
+  BEGIN
+    -- Catch any SQL error and flag it without re-throwing (audit DB failure is non-fatal)
+    DECLARE EXIT HANDLER FOR SQLSTATE LIKE '%'
+    BEGIN
+      SET Environment.Variables.AuditDBFailed = 'True';
+      RESIGNAL;
+    END;
+
+    PASSTHRU(
+      'INSERT INTO myschema.MY_TABLE (COL_A, COL_B, COL_C, CREATED_TS) VALUES (?,?,?,?)',
+      Environment.Variables.RecordData.ColA,
+      Environment.Variables.RecordData.ColB,
+      Environment.Variables.RecordData.ColC,
+      CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd HH:mm:ss.SSSSSS')
+    );
+
+    RETURN TRUE;
+  END;
+END MODULE;
+    ]]></code>
+  </pattern>
+
+  <pattern name="strip_xml_namespaces">
+    <description>Recursively remove all XML namespace declarations from a message tree.
+    Useful when calling backends that do not accept namespace-prefixed XML.</description>
+    <code><![CDATA[
+CREATE PROCEDURE StripNamespaces(IN startRef REFERENCE)
+BEGIN
+  DECLARE fieldRef REFERENCE TO startRef;
+  MOVE fieldRef FIRSTCHILD;
+  IF LASTMOVE(fieldRef) THEN
+    IF FIELDTYPE(fieldRef) IN (0x01000000, 0x03000000, 0x03000102, 0x03000103) THEN
+      SET fieldRef.(XMLNSC.SingleNamespaceDecl)* = NULL;
+      SET fieldRef.(XML.NamespaceDecl)* = NULL;
+      SET fieldRef.(XMLNSC.NamespaceDecl)* = NULL;
+      SET fieldRef NAMESPACE = '';
+    END IF;
+  END IF;
+  WHILE LASTMOVE(fieldRef) DO
+    CALL StripNamespaces(fieldRef);
+    IF FIELDTYPE(fieldRef) IN (0x01000000, 0x03000000, 0x03000102, 0x03000103) THEN
+      SET fieldRef.(XMLNSC.SingleNamespaceDecl)* = NULL;
+      SET fieldRef.(XML.NamespaceDecl)* = NULL;
+      SET fieldRef.(XMLNSC.NamespaceDecl)* = NULL;
+      SET fieldRef NAMESPACE = '';
+    END IF;
+    MOVE fieldRef NEXTSIBLING;
+  END WHILE;
+END;
+    ]]></code>
+  </pattern>
+
+  <pattern name="http_method_routing">
+    <description>Set the outbound HTTP method dynamically based on the inbound method.
+    Used in gateway/proxy flows that need to pass through REST methods.</description>
+    <code><![CDATA[
+-- Inside a Compute module, after determining the target URL:
+DECLARE httpMethod CHARACTER;
+SET httpMethod = TRIM(SUBSTRING(
+    InputRoot.HTTPInputHeader."X-Original-HTTP-Command" FROM 1
+    FOR POSITION(' ' IN InputRoot.HTTPInputHeader."X-Original-HTTP-Command") - 1));
+
+IF    httpMethod = 'PUT'    THEN SET OutputLocalEnvironment.Destination.HTTP.RequestLine.Method = 'PUT';
+ELSEIF httpMethod = 'POST'  THEN SET OutputLocalEnvironment.Destination.HTTP.RequestLine.Method = 'POST';
+ELSEIF httpMethod = 'GET'   THEN SET OutputLocalEnvironment.Destination.HTTP.RequestLine.Method = 'GET';
+ELSEIF httpMethod = 'DELETE'THEN SET OutputLocalEnvironment.Destination.HTTP.RequestLine.Method = 'DELETE';
+ELSEIF httpMethod = 'HEAD'  THEN SET OutputLocalEnvironment.Destination.HTTP.RequestLine.Method = 'HEAD';
+END IF;
+    ]]></code>
+  </pattern>
+
+  <pattern name="scheduled_timer_flow">
+    <description>Schedule a recurring flow to run once per day at a fixed time.
+    Used in batch/scheduled integration flows (e.g., daily data sync, file pickup).</description>
+    <code><![CDATA[
+CREATE COMPUTE MODULE ScheduleDailyRun_Compute
+  CREATE FUNCTION Main() RETURNS BOOLEAN
+  BEGIN
+    DECLARE currHour INTEGER;
+    DECLARE nextStartDate DATE;
+
+    SET OutputRoot = InputRoot;
+    SET OutputLocalEnvironment = InputLocalEnvironment;
+
+    SET currHour = CAST(CAST(CURRENT_TIME AS CHARACTER FORMAT 'HH') AS INTEGER);
+
+    -- If the timer fired after the scheduled hour, push start date to tomorrow
+    IF currHour > 7 THEN
+      SET nextStartDate = CAST(InputLocalEnvironment.TimeoutRequest.StartDate AS DATE);
+      SET nextStartDate = nextStartDate + INTERVAL '1' DAY;
+      SET OutputLocalEnvironment.TimeoutRequest.StartDate = nextStartDate;
+    END IF;
+
+    SET OutputLocalEnvironment.TimeoutRequest.StartTime   = '07:00:00';
+    SET OutputLocalEnvironment.TimeoutRequest.Count       = -1;     -- Run forever
+    SET OutputLocalEnvironment.TimeoutRequest.Interval    = 86400;  -- Once per day (seconds)
+    SET OutputLocalEnvironment.TimeoutRequest.AllowOverwrite = TRUE;
+
+    RETURN TRUE;
+  END;
+
+  CREATE PROCEDURE CopyEntireMessage() BEGIN
+    SET OutputRoot = InputRoot;
+  END;
+END MODULE;
+    ]]></code>
+  </pattern>
+
+  <pattern name="email_error_notification">
+    <description>Compose an error notification email. Used in error handler subflows
+    to alert the support team when integration failures occur. The EmailOutput node
+    requires BLOB body and EmailOutputHeader.</description>
+    <code><![CDATA[
+CREATE COMPUTE MODULE ComposeErrorEmail_Compute
+  CREATE FUNCTION Main() RETURNS BOOLEAN
+  BEGIN
+    DECLARE emailBody CHARACTER;
+    DECLARE CR CHAR CAST(CAST('X''0A''' AS BLOB) AS CHAR CCSID 1208);
+
+    CALL CopyMessageHeaders();
+    CREATE NEXTSIBLING OF OutputRoot.Properties DOMAIN 'EmailOutputHeader';
+
+    SET OutputRoot.EmailOutputHeader.To = EmailTo;         -- UDP: support email DL
+    SET OutputRoot.EmailOutputHeader.From = EmailFrom;     -- UDP: sender name
+    SET OutputRoot.EmailOutputHeader.Subject =
+        'Integration Error: ' || Environment.Variables.WMB.Audit.MsgFlowName;
+
+    SET emailBody = 'Team,' || CR || CR;
+    SET emailBody = emailBody || 'An error has occurred in an integration flow.' || CR || CR;
+    SET emailBody = emailBody || 'Flow Name   : ' || Environment.Variables.WMB.Audit.MsgFlowName || CR;
+    SET emailBody = emailBody || 'Application : ' || Environment.Variables.WMB.Audit.ApplicationName || CR;
+    SET emailBody = emailBody || 'Error Code  : ' || COALESCE(Environment.Variables.WMB.Audit.ErrorCode, 'N/A') || CR;
+    SET emailBody = emailBody || 'Error Detail: ' || COALESCE(Environment.Variables.WMB.Audit.ErrorDetail, 'N/A') || CR;
+    SET emailBody = emailBody || 'Timestamp   : ' || CAST(CURRENT_TIMESTAMP AS CHARACTER FORMAT 'yyyy-MM-dd HH:mm:ss') || CR;
+
+    SET OutputRoot.BLOB.BLOB = CAST(emailBody AS BLOB CCSID 1208);
+    RETURN TRUE;
+  END;
+
+  CREATE PROCEDURE CopyMessageHeaders() BEGIN
+    DECLARE I INTEGER 1;
+    DECLARE J INTEGER;
+    SET J = CARDINALITY(InputRoot.*[]);
+    WHILE I < J DO
+      SET OutputRoot.*[I] = InputRoot.*[I];
+      SET I = I + 1;
+    END WHILE;
+  END;
+END MODULE;
+    ]]></code>
+  </pattern>
+
+</esql_patterns>

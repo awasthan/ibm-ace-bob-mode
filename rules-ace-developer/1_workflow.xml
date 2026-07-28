@@ -1,0 +1,122 @@
+<ace_developer_workflow>
+  <overview>
+    This mode guides you through developing IBM App Connect Enterprise (ACE) integration
+    projects end-to-end: from understanding requirements, creating message flows, writing
+    ESQL and Java, managing project structure, all the way through testing and validation.
+  </overview>
+
+  <critical_prerequisite>
+    <rule>ALWAYS activate the skill 'ace-bob' before creating or modifying ANY ACE artifact
+    (message flows, ESQL, Java compute nodes, Maps, subflows, project files).
+    The ace-bob skill provides the definitive xmi:type namespace prefixes and project
+    structure rules that MUST be followed exactly.</rule>
+    <rule>Never guess xmi:type values — always verify from the ace-bob skill reference.</rule>
+    <rule>Never copy xmi:type values from existing example .msgflow files without verifying
+    them against the ace-bob skill, as existing files may use outdated namespace prefixes.</rule>
+  </critical_prerequisite>
+
+  <development_workflow>
+    <phase name="1_understand">
+      <title>Understand Requirements</title>
+      <steps>
+        <step>Read and understand the integration use case — protocol (HTTP/SOAP/MQ/File),
+        message format (XML/JSON/CSV), and transformation requirements.</step>
+        <step>Identify the project type: Application, Library (.Lib), or Service (.Service).</step>
+        <step>Determine whether a shared library project is needed for reusable subflows/ESQL.</step>
+        <step>Identify all external systems: REST APIs, SOAP web services, databases, MQ queues,
+        file systems, etc.</step>
+        <step>Clarify error handling requirements: what should happen on failure, timeout,
+        and unexpected input.</step>
+        <step>Identify environment-specific configuration requirements (DEV/QA/UAT/PROD properties).</step>
+      </steps>
+    </phase>
+
+    <phase name="2_design">
+      <title>Design the Integration Solution</title>
+      <steps>
+        <step>Design the high-level message flow: input node → processing nodes → output node.</step>
+        <step>Identify which built-in nodes are needed (see 2_node_reference.xml for guidance).</step>
+        <step>Plan shared subflows for cross-cutting concerns: error handling, auditing, logging.</step>
+        <step>Design ESQL modules for each Compute node, following naming conventions in
+        3_best_practices.xml.</step>
+        <step>Plan the Environment tree usage for passing state between nodes (avoid overuse
+        of SHARED variables).</step>
+        <step>Design the error handling strategy: TryCatch node wrapping, catch terminal handling,
+        and SOAP fault / HTTP error response generation.</step>
+      </steps>
+    </phase>
+
+    <phase name="3_implement">
+      <title>Implement</title>
+      <steps>
+        <step>Activate the ace-bob skill FIRST.</step>
+        <step>Create the ACE project structure (.project, .settings, application.descriptor or
+        library.descriptor).</step>
+        <step>Create message flow files (.msgflow) — validate every xmi:type from ace-bob skill.</step>
+        <step>Create ESQL files (.esql) with the correct BROKER SCHEMA declaration.</step>
+        <step>Create Java files (.java) for JavaCompute nodes when needed.</step>
+        <step>Create environment-specific properties files (DEV.properties, QA.properties,
+        UAT.properties, PROD.properties).</step>
+        <step>Follow all patterns documented in 3_best_practices.xml and 4_esql_patterns.xml.</step>
+      </steps>
+    </phase>
+
+    <phase name="4_validate">
+      <title>Validate and Test</title>
+      <steps>
+        <step>Review each message flow for correct node connections (terminals must match).</step>
+        <step>Validate ESQL syntax: every CREATE COMPUTE MODULE must have matching END MODULE.</step>
+        <step>Verify BROKER SCHEMA declarations match the project package path.</step>
+        <step>Test using the SoapUI projects in the workspace (look for *_SOAPUI_Project folders).</step>
+        <step>Test error paths: submit invalid inputs, simulate backend failures.</step>
+        <step>Test timeout handling: verify timeout nodes and error responses work correctly.</step>
+        <step>Verify properties files have all required User-Defined Properties (UDPs).</step>
+      </steps>
+    </phase>
+  </development_workflow>
+
+  <project_types>
+    <type name="Application">
+      <description>Deployable ACE application containing message flows and ESQL.
+      Contains an application.descriptor file. Project nature:
+      com.ibm.etools.msgbroker.tooling.applicationNature</description>
+      <file_extension>No suffix — use a plain descriptive name (e.g. WeatherAPI, not WeatherAPI.App)</file_extension>
+      <naming_rule>DO NOT append '.App' to Application project names. Use a clean name such as
+      'WeatherAPI', 'OrderService', 'CustomerAPI'. The '.App' suffix is an old convention that
+      must NOT be followed.</naming_rule>
+      <descriptor>application.descriptor</descriptor>
+    </type>
+    <type name="Library">
+      <description>Shared reusable components (subflows, ESQL procedures, schemas).
+      Not directly deployable. Referenced by Application projects.
+      Contains a library.descriptor file.</description>
+      <file_extension>.Lib (convention)</file_extension>
+      <descriptor>library.descriptor</descriptor>
+    </type>
+    <type name="Service">
+      <description>WSDL-driven web service project. Contains WSDL, XSD, and
+      generated message flows. Project nature includes service descriptor.</description>
+      <descriptor>service.descriptor</descriptor>
+    </type>
+  </project_types>
+
+  <project_directory_conventions>
+    <convention>Source files live under a Java-style package path (e.g., com/company/esb/)</convention>
+    <convention>Properties files live under properties/ subdirectory</convention>
+    <convention>Generated files from WSDL live under gen/ subdirectory</convention>
+    <convention>WSDL and XSD files referenced by service projects live under RemoteFiles/</convention>
+    <convention>IBM-defined schemas live under IBMdefined/</convention>
+    <convention>BAR files (deployment archives) live in the project root</convention>
+  </project_directory_conventions>
+
+  <testing_workflow>
+    <step>Locate the corresponding *_SOAPUI_Project directory for the service being tested.</step>
+    <step>Open the SoapUI project (*.xml file) in SoapUI or use the SOAP UI command line.</step>
+    <step>Configure the endpoint URL to match the DEV environment (from DEV.properties).</step>
+    <step>Run positive test cases: valid input, expected output.</step>
+    <step>Run negative test cases: malformed XML, missing fields, invalid values.</step>
+    <step>Verify error responses contain correct SOAP fault codes and messages.</step>
+    <step>Check the ACE system log for any exceptions or warnings.</step>
+    <step>Verify audit records are created if the flow uses audit subflows.</step>
+  </testing_workflow>
+</ace_developer_workflow>
